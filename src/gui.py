@@ -67,6 +67,19 @@ class App:
 
         # Keep a reference to the thread so we can disable buttons while running
         self.current_thread = None
+        
+        # After building the main window, decide startup flow based on whether an authorized voice exists
+        try:
+            import src.voice_unlock as _vu
+            if not _vu._authorized_exists():
+                # No authorized voice yet -> open a separate initial window to set password
+                self.show_initial_window()
+            else:
+                # Authorized voice exists -> show a landing page that only offers Unlock
+                self.show_locked_landing()
+        except Exception:
+            # If voice_unlock not available, just continue showing main window
+            pass
 
     def run_in_thread(self, target, *args, **kwargs):
         if self.current_thread and self.current_thread.is_alive():
@@ -99,6 +112,37 @@ class App:
         self.enroll_btn.config(state="normal")
         self.unlock_btn.config(state="normal")
         self.exit_btn.config(state="normal")
+
+    def show_locked_landing(self):
+        # Show a landing area in the main window that only allows unlocking (no enroll)
+        self.clear_overlay_frames()
+        # hide the enroll button to avoid re-enroll option here
+        try:
+            self.enroll_btn.place_forget()
+        except Exception:
+            pass
+
+        self.home_frame = tk.Frame(self.master, bg="#fff3fb", bd=0)
+        self.home_frame.place(x=110, y=300, width=500, height=340)
+
+        title = tk.Label(self.home_frame, text="Welcome Back 💖", bg="#fff3fb", fg="#9b1948",
+                         font=("Helvetica", 18, "bold"))
+        title.pack(pady=(12, 6))
+
+        desc = tk.Label(self.home_frame, text="Unlock your secret journal with your voice.",
+                        bg="#fff3fb", fg="#a3164a", font=("Helvetica", 11), wraplength=420, justify="center")
+        desc.pack(pady=(0, 18))
+
+        unlock_btn = tk.Button(self.home_frame, text="🔐 Unlock", bg="#ff5f9e", fg="white",
+                               activebackground="#ff3f84", font=("Helvetica", 12, "bold"), bd=0,
+                               command=self.on_unlock)
+        unlock_btn.pack(pady=6, ipadx=10, ipady=6)
+
+        # provide a change password option that opens the initial window
+        change_btn = tk.Button(self.home_frame, text="Change Password", bg="#ff7fbf", fg="white",
+                               activebackground="#ff5fa8", font=("Helvetica", 11), bd=0,
+                               command=self.show_initial_window)
+        change_btn.pack(pady=(10,0))
 
     def on_enroll(self):
         # run enroll in background and update status
