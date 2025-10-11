@@ -1,8 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
 import threading
-import random
-import time
 try:
     from PIL import Image, ImageTk  # type: ignore
     _PIL_AVAILABLE = True
@@ -89,13 +86,6 @@ class App:
         # Manage clickability when using canvas items
         self._unlock_clickable = True
 
-    def create_notebook(self):
-        """Create the notebook UI with decorative elements."""
-        self._create_canvas()
-        self._create_notebook_paper()
-        self._create_spiral_binding()
-        self._add_sparkles()
-        self._add_title()
 
     def _create_center_unlock_button(self):
         """Create a centered unlock image on the canvas with click handling for transparent PNGs."""
@@ -174,80 +164,6 @@ class App:
         except Exception:
             return base
 
-    def _create_canvas(self):
-        """Create the main canvas for the notebook."""
-        self.canvas = tk.Canvas(
-            self.master,
-            width=self.CANVAS_SIZE[0], 
-            height=self.CANVAS_SIZE[1],
-            bg=Colors.BG_CANVAS,
-            highlightthickness=0
-        )
-        self.canvas.place(x=10, y=10)
-
-    def _create_notebook_paper(self):
-        """Create the main paper area of the notebook."""
-        self.canvas.create_rectangle(
-            self.NOTEBOOK_PADDING, self.NOTEBOOK_PADDING,
-            660, 760,
-            fill=Colors.BG_PAPER,
-            outline=Colors.ACCENT_SPIRAL,
-            width=3
-        )
-
-    def _create_spiral_binding(self):
-        """Create decorative spiral binding on the notebook's left side."""
-        for i in range(9):
-            y = 80 + i * 70
-            self.canvas.create_oval(
-                30, y, 50, y + 30,
-                fill=Colors.ACCENT_SPIRAL,
-                outline=Colors.ACCENT_SPIRAL_OUTLINE
-            )
-
-    def _add_sparkles(self):
-        """Add decorative sparkles to the notebook."""
-        for _ in range(120):
-            x = random.randint(80, 620)
-            y = random.randint(60, 720)
-            r = random.randint(1, 4)
-            color = random.choice(Colors.ACCENT_SPARKLE)
-            self.canvas.create_oval(x, y, x + r, y + r, fill=color, outline=color)
-
-    def _add_title(self):
-        """Add the title and subtitle to the notebook."""
-        self.canvas.create_text(
-            self.TITLE_POSITION["x"], self.TITLE_POSITION["y"],
-            text="My Secret Journal",
-            fill=Colors.TEXT_TITLE,
-            font=("Helvetica", 28, "bold")
-        )
-        self.canvas.create_text(
-            self.SUBTITLE_POSITION["x"], self.SUBTITLE_POSITION["y"],
-            text="Unlock with your voice 💖",
-            fill=Colors.TEXT_SUBTITLE,
-            font=("Helvetica", 12)
-        )
-
-    def create_controls(self):
-        """Create interactive UI controls."""
-        self._create_status_area()
-        # self._create_journal_area()
-        self._create_buttons()
-
-    def _create_status_area(self):
-        """Create the status message area."""
-        self.status_var = tk.StringVar(value="")
-        self.status_label = tk.Label(
-            self.master,
-            textvariable=self.status_var,
-            bg=Colors.BG_PAPER,
-            fg=Colors.TEXT_STATUS,
-            font=("Helvetica", 11),
-            wraplength=520,
-            justify="center"
-        )
-        self.status_label.place(**self.STATUS_POSITION)
 
     # def _create_journal_area(self):
     #     """Create the journal text area."""
@@ -262,52 +178,13 @@ class App:
     #     self.journal.config(state="disabled")
     #     self.journal.place(**self.NOTEBOOK_MARGINS)
 
-    def _create_buttons(self):
-        """Create the unlock and exit buttons."""
-        self.unlock_btn = tk.Button(
-            self.master,
-            text="🔐 Unlock",
-            command=self.on_unlock,
-            bg=Colors.BTN_UNLOCK,
-            fg=Colors.TEXT_BTN,
-            activebackground=Colors.BTN_UNLOCK_ACTIVE,
-            font=("Helvetica", 12, "bold"),
-            bd=0
-        )
-        self.unlock_btn.place(**self.UNLOCK_BTN_POSITION)
-
-        self.exit_btn = tk.Button(
-            self.master,
-            text="Exit",
-            command=self.master.quit,
-            bg=Colors.BTN_EXIT,
-            fg=Colors.TEXT_EXIT,
-            activebackground=Colors.BTN_EXIT_ACTIVE,
-            font=("Helvetica", 11),
-            bd=0
-        )
-        self.exit_btn.place(**self.EXIT_BTN_POSITION)
-
-    def check_authorization(self):
-        """Check if a voice is authorized and show appropriate screen."""
-        try:
-            import src.voice_unlock as _vu
-            if not _vu._authorized_exists():
-                self.show_initial_window()
-            else:
-                self.show_locked_landing()
-        except ImportError:
-            # If voice_unlock not available, continue showing main window
-            pass
+    
 
     def show_locked_landing(self):
         """Show only the background; no welcome back splash screen."""
         self.clear_overlay_frames()
         # Removed welcome back splash screen UI elements
 
-    def show_initial_window(self):
-        """Show an initial window to set up voice authentication."""
-        self.set_status("Initial setup: Please set your password.")
 
     def clear_overlay_frames(self):
         """Remove any overlay frames and windows."""
@@ -380,29 +257,6 @@ class App:
         t.start()
         return True
 
-    def on_enroll(self):
-        """Handle voice enrollment process."""
-        try:
-            import src.voice_unlock as voice_unlock
-            
-            def do_enroll():
-                # Perform enrollment in background thread; UI updates scheduled on main thread
-                ok = voice_unlock.enroll()
-                try:
-                    if ok:
-                        self.master.after(0, self.set_status, "✅ Voice enrolled. You can now try to unlock.")
-                    else:
-                        self.master.after(0, self.set_status, "Enrollment failed. See console for details.")
-                except Exception:
-                    pass
-
-            # Indicate recording on the main thread before starting
-            self.set_status("Recording enrollment (3s)... 🎤")
-            self.run_in_thread(do_enroll)
-        except ImportError:
-            self.set_status("Could not start enrollment: Voice unlock module not found")
-        except Exception as e:
-            self.set_status(f"Could not start enrollment: {str(e)}")
 
     def on_unlock(self):
         """Handle voice verification process."""
