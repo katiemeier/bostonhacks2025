@@ -101,8 +101,8 @@ class NoteApp:
         self.paper_canvas.coords(self.text_window, 0, 0)
         if w > 0 and h > 0:
             self.paper_canvas.itemconfigure(self.text_window, width=w, height=h)
-    # Draw/refresh notebook lines to span full width/height
-    self._draw_notebook_lines()
+        # Draw/refresh notebook lines to span full width/height
+        self._draw_notebook_lines()
 
     def _draw_notebook_lines(self):
         # Remove previous lines
