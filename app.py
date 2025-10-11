@@ -38,8 +38,8 @@ class Launcher:
         except Exception:
             pass
 
-        # Initialize main application
-        self.app = App()
+        # Initialize main application with a callback for successful unlock
+        self.app = App(on_unlocked=self._open_note_app)
 
         # Show locked landing if voice is authorized
         try:
@@ -51,33 +51,11 @@ class Launcher:
         except Exception:
             pass
 
-        # Wrap voice verification
-        if hasattr(voice_unlock, "verify"):
-            self._orig_verify = voice_unlock.verify
-
-            def wrapped_verify():
-                res = self._orig_verify()
-                try:
-                    if isinstance(res, dict) and res.get("status") == "granted":
-                        # Schedule GUI update on main thread
-                        try:
-                            self.app.master.after(AFTER_DELAY, self._open_note_app)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                return res
-
-            voice_unlock.verify = wrapped_verify
+        # No monkey-patching of voice_unlock.verify; GUI will invoke on_unlocked callback
 
     def _open_note_app(self):
         """Destroy current window and launch note app."""
         try:
-            try:
-                self.app.master.destroy()
-            except Exception:
-                pass
-
             try:
                 note_module = import_module('src.noteapp')
                 NoteApp = getattr(note_module, 'NoteApp', None)
@@ -85,9 +63,25 @@ class Launcher:
                     print('NoteApp not found in src.noteapp')
                     return
 
-                new_root = tk.Tk()
-                note_app = NoteApp(new_root)
-                new_root.mainloop()
+                # Prefer a single Tk root: hide current window and open a Toplevel
+                try:
+                    self.app.master.withdraw()
+                except Exception:
+                    pass
+
+                top = tk.Toplevel(self.app.master)
+                NoteApp(top)
+
+                # When note window closes, also close the hidden root to exit cleanly
+                def on_close():
+                    try:
+                        top.destroy()
+                    finally:
+                        try:
+                            self.app.master.destroy()
+                        except Exception:
+                            pass
+                top.protocol("WM_DELETE_WINDOW", on_close)
             except Exception as e:
                 print(f'Failed to start NoteApp: {e}')
         except Exception as e:
