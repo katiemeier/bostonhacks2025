@@ -51,7 +51,7 @@ def verify():
         score = similarity(authorized, attempt)
 
         print(f"🔍 Voice similarity score: {score:.3f}")
-        if score > 0.80:
+        if score > 0.70:
             print("✅ Access Granted! Your secret journal is unlocked 💖")
             return {"status": "granted", "score": float(score)}
         else:

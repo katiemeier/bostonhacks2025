@@ -38,9 +38,9 @@ class App:
         self.canvas.create_text(360, 150, text="Unlock with your voice 💖", fill="#a3164a", font=("Helvetica", 12))
 
         # Status area (inside the notebook)
-        self.status_var = tk.StringVar(value="Welcome — please enroll or unlock.")
+        self.status_var = tk.StringVar(value="")
         self.status_label = tk.Label(self.master, textvariable=self.status_var, bg="#fff3fb", fg="#9b1948",
-                                     font=("Helvetica", 11), wraplength=520, justify="center")
+                                    font=("Helvetica", 11), wraplength=520, justify="center")
         self.status_label.place(x=110, y=220, width=500, height=60)
 
         # Secret text area (hidden until unlocked)
@@ -49,16 +49,12 @@ class App:
         self.journal.config(state="disabled")
         self.journal.place(x=110, y=300, width=500, height=340)
 
-        # Pretty buttons
-        self.enroll_btn = tk.Button(self.master, text="✦ Enroll Voice", command=self.on_enroll,
-                                    bg="#ff7fbf", fg="white", activebackground="#ff5fa8",
-                                    font=("Helvetica", 12, "bold"), bd=0)
-        self.enroll_btn.place(x=160, y=670, width=150, height=44)
+        # Pretty buttons (enroll button removed; initial setup handles enrollment)
 
         self.unlock_btn = tk.Button(self.master, text="🔐 Unlock", command=self.on_unlock,
                                     bg="#ff5f9e", fg="white", activebackground="#ff3f84",
                                     font=("Helvetica", 12, "bold"), bd=0)
-        self.unlock_btn.place(x=340, y=670, width=150, height=44)
+        self.unlock_btn.place(x=300, y=670, width=150, height=44)
 
         self.exit_btn = tk.Button(self.master, text="Exit", command=self.master.quit,
                                   bg="#ffb6d9", fg="#6a0b3a", activebackground="#ffa2d1",
@@ -100,27 +96,40 @@ class App:
         t.start()
         return True
 
+    def clear_overlay_frames(self):
+        # destroy dynamic frames (home/editor)
+        for name in ("home_frame", "editor_frame"):
+            f = getattr(self, name, None)
+            if f:
+                try:
+                    f.destroy()
+                except Exception:
+                    pass
+                setattr(self, name, None)
+
+        # if an initial separate window exists, try to destroy it
+        if getattr(self, 'initial_win', None):
+            try:
+                self.initial_win.destroy()
+            except Exception:
+                pass
+            self.initial_win = None
+
     def set_status(self, text):
         self.status_var.set(text)
 
     def disable_buttons(self):
-        self.enroll_btn.config(state="disabled")
         self.unlock_btn.config(state="disabled")
         self.exit_btn.config(state="disabled")
 
     def enable_buttons(self):
-        self.enroll_btn.config(state="normal")
         self.unlock_btn.config(state="normal")
         self.exit_btn.config(state="normal")
 
     def show_locked_landing(self):
         # Show a landing area in the main window that only allows unlocking (no enroll)
         self.clear_overlay_frames()
-        # hide the enroll button to avoid re-enroll option here
-        try:
-            self.enroll_btn.place_forget()
-        except Exception:
-            pass
+    # enroll handled during initial setup; don't show it on locked landing
 
         self.home_frame = tk.Frame(self.master, bg="#fff3fb", bd=0)
         self.home_frame.place(x=110, y=300, width=500, height=340)
@@ -133,10 +142,10 @@ class App:
                         bg="#fff3fb", fg="#a3164a", font=("Helvetica", 11), wraplength=420, justify="center")
         desc.pack(pady=(0, 18))
 
-        unlock_btn = tk.Button(self.home_frame, text="🔐 Unlock", bg="#ff5f9e", fg="white",
-                               activebackground="#ff3f84", font=("Helvetica", 12, "bold"), bd=0,
-                               command=self.on_unlock)
-        unlock_btn.pack(pady=6, ipadx=10, ipady=6)
+        # unlock_btn = tk.Button(self.home_frame, text="🔐 Unlock", bg="#ff5f9e", fg="white",
+        #                        activebackground="#ff3f84", font=("Helvetica", 12, "bold"), bd=0,
+        #                        command=self.on_unlock)
+        # unlock_btn.pack(pady=6, ipadx=10, ipady=6)
 
         # provide a change password option that opens the initial window
         change_btn = tk.Button(self.home_frame, text="Change Password", bg="#ff7fbf", fg="white",

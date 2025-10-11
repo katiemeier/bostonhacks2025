@@ -1,3 +1,4 @@
 audio/
 src/__pycache__/
 notes/
+__pycache__/
