@@ -35,7 +35,7 @@ class NoteApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Simple Note App")
-        self.root.geometry("800x500")
+        self.root.geometry("816x503")
         self.root.configure(bg=BG_PINK)
         # spacing between notebook lines (pixels)
         self.line_spacing = 26
