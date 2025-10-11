@@ -1,4 +1,5 @@
-audio/*
+audio/attempt.wav
+audio/authorized.wav
 src/__pycache__/
 notes/
 __pycache__/
