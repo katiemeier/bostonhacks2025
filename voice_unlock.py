@@ -9,6 +9,7 @@ import os
 
 # === Step 1: Record audio ===
 def record_voice(filename, duration=3, fs=16000):
+    # Recording with sounddevice; this function is synchronous
     print(f"🎤 Recording for {duration} seconds...")
     audio = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
     sd.wait()
@@ -27,26 +28,41 @@ def similarity(a, b):
 
 # === Step 4: Enrollment ===
 def enroll():
-    record_voice("authorized.wav", duration=3)
-    print("Your voice password is saved! 🗝️")
+    try:
+        record_voice("authorized.wav", duration=3)
+        print("Your voice password is saved! 🗝️")
+        return True
+    except Exception as e:
+        print(f"Enrollment failed: {e}")
+        return False
 
 # === Step 5: Verification ===
 def verify():
     if not os.path.exists("authorized.wav"):
-        print("No authorized voice found! Please enroll first.")
-        return
-    
-    record_voice("attempt.wav", duration=3)
+        msg = "No authorized voice found! Please enroll first."
+        print(msg)
+        return {"status": "no_enrollment", "message": msg}
 
-    authorized = get_embedding("authorized.wav")
-    attempt = get_embedding("attempt.wav")
-    score = similarity(authorized, attempt)
+    try:
+        record_voice("attempt.wav", duration=3)
 
-    print(f"🔍 Voice similarity score: {score:.3f}")
-    if score > 0.85:
-        print("✅ Access Granted! Your secret journal is unlocked 💖")
-    else:
-        print("❌ Access Denied! Voice does not match.")
+        authorized = get_embedding("authorized.wav")
+        attempt = get_embedding("attempt.wav")
+        score = similarity(authorized, attempt)
+
+        print(f"🔍 Voice similarity score: {score:.3f}")
+        if score > 0.85:
+            print("✅ Access Granted! Your secret journal is unlocked 💖")
+            return {"status": "granted", "score": float(score)}
+        else:
+            print("❌ Access Denied! Voice does not match.")
+            return {"status": "denied", "score": float(score)}
+    except Exception as e:
+        print(f"Verification failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+def _authorized_exists():
+    return os.path.exists("authorized.wav")
 
 # === Step 6: Simple menu ===
 def main():
