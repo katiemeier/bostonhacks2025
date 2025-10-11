@@ -29,7 +29,7 @@ def similarity(a, b):
 # === Step 4: Enrollment ===
 def enroll():
     try:
-        record_voice("authorized.wav", duration=3)
+        record_voice("audio/authorized.wav", duration=3)
         print("Your voice password is saved! 🗝️")
         return True
     except Exception as e:
@@ -38,16 +38,16 @@ def enroll():
 
 # === Step 5: Verification ===
 def verify():
-    if not os.path.exists("authorized.wav"):
+    if not os.path.exists("audio/authorized.wav"):
         msg = "No authorized voice found! Please enroll first."
         print(msg)
         return {"status": "no_enrollment", "message": msg}
 
     try:
-        record_voice("attempt.wav", duration=3)
+        record_voice("audio/attempt.wav", duration=3)
 
-        authorized = get_embedding("authorized.wav")
-        attempt = get_embedding("attempt.wav")
+        authorized = get_embedding("audio/authorized.wav")
+        attempt = get_embedding("audio/attempt.wav")
         score = similarity(authorized, attempt)
 
         print(f"🔍 Voice similarity score: {score:.3f}")
@@ -62,7 +62,7 @@ def verify():
         return {"status": "error", "message": str(e)}
 
 def _authorized_exists():
-    return os.path.exists("authorized.wav")
+    return os.path.exists("audio/authorized.wav")
 
 # === Step 6: Simple menu ===
 def main():
