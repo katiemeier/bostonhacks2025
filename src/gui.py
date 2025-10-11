@@ -55,9 +55,11 @@ class App:
     UNLOCK_BTN_POSITION = {"x": 216, "y": 340, "width": 150, "height": 40}  # modified from {"x": 300, "y": 670, "width": 150, "height": 44}
     EXIT_BTN_POSITION = {"x": 450, "y": 340, "width": 150, "height": 40}  # modified from {"x": 520, "y": 670, "width": 90, "height": 40}
     
-    def __init__(self, master=None):
+    def __init__(self, master=None, on_unlocked=None):
         """Initialize the application with the main window and UI components."""
         self.master = master or tk.Tk()
+        # Optional callback invoked when access is granted
+        self.on_unlocked = on_unlocked
         self.current_thread = None
         self.setup_window()
         # Show only the background; skip creating overlays and auth screens
@@ -359,10 +361,18 @@ class App:
             try:
                 target(*args, **kwargs)
             except Exception as e:
-                self.set_status(f"Error: {e}")
+                # Schedule UI update on the main thread
+                try:
+                    self.master.after(0, self.set_status, f"Error: {e}")
+                except Exception:
+                    pass
             finally:
                 self.current_thread = None
-                self.enable_buttons()
+                # Re-enable buttons on the main thread
+                try:
+                    self.master.after(0, self.enable_buttons)
+                except Exception:
+                    pass
 
         self.disable_buttons()
         t = threading.Thread(target=wrapper, daemon=True)
@@ -376,12 +386,18 @@ class App:
             import src.voice_unlock as voice_unlock
             
             def do_enroll():
-                self.set_status("Recording enrollment (3s)... 🎤")
-                if voice_unlock.enroll():
-                    self.set_status("✅ Voice enrolled. You can now try to unlock.")
-                else:
-                    self.set_status("Enrollment failed. See console for details.")
+                # Perform enrollment in background thread; UI updates scheduled on main thread
+                ok = voice_unlock.enroll()
+                try:
+                    if ok:
+                        self.master.after(0, self.set_status, "✅ Voice enrolled. You can now try to unlock.")
+                    else:
+                        self.master.after(0, self.set_status, "Enrollment failed. See console for details.")
+                except Exception:
+                    pass
 
+            # Indicate recording on the main thread before starting
+            self.set_status("Recording enrollment (3s)... 🎤")
             self.run_in_thread(do_enroll)
         except ImportError:
             self.set_status("Could not start enrollment: Voice unlock module not found")
@@ -395,11 +411,18 @@ class App:
             
             def do_verify():
                 if not voice_unlock._authorized_exists():
-                    self.set_status("No authorized voice found. Please enroll first.")
+                    try:
+                        self.master.after(0, self.set_status, "No authorized voice found. Please enroll first.")
+                    except Exception:
+                        pass
                     return
-                self.set_status("Recording attempt (3s)... 🎤")
+                # Perform verification in background thread
                 result = voice_unlock.verify()
-                self._handle_verification_result(result)
+                # Hand result back to main thread for UI updates
+                try:
+                    self.master.after(0, self._handle_verification_result, result)
+                except Exception:
+                    pass
 
             self.run_in_thread(do_verify)
         except ImportError:
@@ -417,6 +440,13 @@ class App:
         score = result.get("score", 0)
         if status == "granted":
             self.set_status(f"✅ Access Granted! Similarity: {score:.3f}")
+            # Notify launcher if provided
+            try:
+                if callable(getattr(self, "on_unlocked", None)):
+                    # Ensure callback on main thread
+                    self.master.after(0, self.on_unlocked)
+            except Exception:
+                pass
             self._unlock_journal()
         elif status == "denied":
             self.set_status(f"❌ Access Denied. Similarity: {score:.3f}")
