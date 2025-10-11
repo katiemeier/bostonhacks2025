@@ -8,8 +8,11 @@ Behavior:
 - Starts the Tkinter mainloop.
 """
 
-import voice_unlock
-from gui import App
+import src.voice_unlock as voice_unlock
+from src.gui import App
+import tkinter as tk
+
+from importlib import import_module
 
 
 class Launcher:
@@ -24,9 +27,9 @@ class Launcher:
                 res = self._orig_verify()
                 try:
                     if isinstance(res, dict) and res.get("status") == "granted":
-                        # schedule GUI update on main thread
+                        # schedule GUI update on main thread to open the NoteApp
                         try:
-                            self.app.master.after(100, getattr(self.app, "show_home", lambda: None))
+                            self.app.master.after(100, self._open_note_app)
                         except Exception:
                             pass
                 except Exception:
@@ -34,6 +37,31 @@ class Launcher:
                 return res
 
             voice_unlock.verify = wrapped_verify
+
+    def _open_note_app(self):
+        # Close the current GUI window and launch the note app in a new Tk root
+        try:
+            # destroy the existing root
+            try:
+                self.app.master.destroy()
+            except Exception:
+                pass
+
+            # import and launch note app
+            try:
+                note_module = import_module('src.noteapp')
+                NoteApp = getattr(note_module, 'NoteApp', None)
+                if NoteApp is None:
+                    print('NoteApp not found in src.noteapp')
+                    return
+
+                new_root = tk.Tk()
+                note_app = NoteApp(new_root)
+                new_root.mainloop()
+            except Exception as e:
+                print(f'Failed to start NoteApp: {e}')
+        except Exception as e:
+            print(f'Error opening note app: {e}')
 
     def run(self):
         self.app.run()

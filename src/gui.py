@@ -103,7 +103,7 @@ class App:
     def on_enroll(self):
         # run enroll in background and update status
         try:
-            import voice_unlock
+            import src.voice_unlock as voice_unlock
 
             def do_enroll():
                 self.set_status("Recording enrollment (3s)... 🎤")
@@ -120,7 +120,7 @@ class App:
 
     def on_unlock(self):
         try:
-            import voice_unlock
+            import src.voice_unlock as voice_unlock
 
             def do_verify():
                 if not voice_unlock._authorized_exists():
