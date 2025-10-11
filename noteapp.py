@@ -1,3 +1,9 @@
+BG_PINK = "#ffb6c1"
+FG_PURPLE = "#800080"
+BTN_PINK = "#ff69b4"
+BTN_PURPLE = "#c084fc"
+ENTRY_BG = "#ffe4fa"
+TEXT_BG = "#f3c4fb"
 
 import tkinter as tk
 from tkinter import messagebox, filedialog
@@ -25,25 +31,26 @@ class NoteApp:
         self.root = root
         self.root.title("Simple Note App")
         self.root.geometry("600x500")
+        self.root.configure(bg=BG_PINK)
 
         # Entry for note name
-        name_frame = tk.Frame(root)
+        name_frame = tk.Frame(root, bg=BG_PINK)
         name_frame.pack(fill="x", pady=(10,0))
-        tk.Label(name_frame, text="Note Name:", font=("Arial", 11)).pack(side="left", padx=(10,5))
-        self.name_entry = tk.Entry(name_frame, font=("Arial", 11), width=30)
+        tk.Label(name_frame, text="Note Name:", font=("Arial", 11, "bold"), fg=FG_PURPLE, bg=BG_PINK).pack(side="left", padx=(10,5))
+        self.name_entry = tk.Entry(name_frame, font=("Arial", 11), width=30, bg=ENTRY_BG, fg=FG_PURPLE, insertbackground=FG_PURPLE)
         self.name_entry.pack(side="left", padx=(0,10))
 
         # Create frame for buttons
-        button_frame = tk.Frame(root)
+        button_frame = tk.Frame(root, bg=BG_PINK)
         button_frame.pack(fill="x", pady=10)
 
-        tk.Button(button_frame, text="New", width=10, command=self.new_note).pack(side="left", padx=5)
-        tk.Button(button_frame, text="Open", width=10, command=self.open_note).pack(side="left", padx=5)
-        tk.Button(button_frame, text="Save", width=10, command=self.save_note).pack(side="left", padx=5)
-        tk.Button(button_frame, text="Delete", width=10, command=self.delete_note).pack(side="left", padx=5)
+        tk.Button(button_frame, text="New", width=10, command=self.new_note, bg=BTN_PINK, fg=FG_PURPLE, activebackground=BTN_PURPLE, activeforeground=BG_PINK).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Open", width=10, command=self.open_note, bg=BTN_PINK, fg=FG_PURPLE, activebackground=BTN_PURPLE, activeforeground=BG_PINK).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Save", width=10, command=self.save_note, bg=BTN_PINK, fg=FG_PURPLE, activebackground=BTN_PURPLE, activeforeground=BG_PINK).pack(side="left", padx=5)
+        tk.Button(button_frame, text="Delete", width=10, command=self.delete_note, bg=BTN_PINK, fg=FG_PURPLE, activebackground=BTN_PURPLE, activeforeground=BG_PINK).pack(side="left", padx=5)
 
         # Text area for typing notes
-        self.text_area = tk.Text(root, wrap="word", font=("Arial", 12))
+        self.text_area = tk.Text(root, wrap="word", font=("Arial", 12), bg=TEXT_BG, fg=FG_PURPLE, insertbackground=FG_PURPLE)
         self.text_area.pack(expand=True, fill="both", padx=10, pady=10)
 
         self.current_file = None
