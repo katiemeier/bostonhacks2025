@@ -37,6 +37,8 @@ class NoteApp:
         self.root.title("Simple Note App")
         self.root.geometry("800x500")
         self.root.configure(bg=BG_PINK)
+        # spacing between notebook lines (pixels)
+        self.line_spacing = 26
 
         # Main frame for sidebar and content
         main_frame = tk.Frame(root, bg=BG_PINK)
@@ -85,8 +87,13 @@ class NoteApp:
         )
         self.text_window = self.paper_canvas.create_window(0, 0, anchor="nw", window=self.text_area)
 
+        # Redraw lines on resize and ensure clicking canvas focuses the text area
         self.paper_canvas.bind("<Configure>", self._on_canvas_resize)
-        self.root.after(500, lambda: self._on_canvas_resize(None))
+        self.paper_canvas.bind("<Button-1>", lambda e: self.text_area.focus_set())
+        self.root.after(10, lambda: self._on_canvas_resize(None))
+
+        # Initialize current file state
+        self.current_file = None
     def _on_canvas_resize(self, event):
         w = self.paper_canvas.winfo_width()
         h = self.paper_canvas.winfo_height()
@@ -94,8 +101,27 @@ class NoteApp:
         self.paper_canvas.coords(self.text_window, 0, 0)
         if w > 0 and h > 0:
             self.paper_canvas.itemconfigure(self.text_window, width=w, height=h)
+    # Draw/refresh notebook lines to span full width/height
+    self._draw_notebook_lines()
 
-        self.current_file = None
+    def _draw_notebook_lines(self):
+        # Remove previous lines
+        self.paper_canvas.delete("notebook_line")
+        w = self.paper_canvas.winfo_width()
+        h = self.paper_canvas.winfo_height()
+        if w <= 0 or h <= 0:
+            return
+        y = 0
+        while y < h:
+            self.paper_canvas.create_line(
+                0, y, w, y, fill=BLACK, width=2, tags=("notebook_line",)
+            )
+            y += self.line_spacing
+        # Ensure lines are visible above the text window
+        try:
+            self.paper_canvas.tag_raise("notebook_line")
+        except Exception:
+            pass
     def _populate_toc(self):
         self.toc_listbox.delete(0, tk.END)
         notes = [f for f in os.listdir(NOTES_DIR) if f.endswith('.md')]
