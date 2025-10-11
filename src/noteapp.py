@@ -36,8 +36,8 @@ class NoteApp:
         # Entry for note name
         name_frame = tk.Frame(root, bg=BG_PINK)
         name_frame.pack(fill="x", pady=(10,0))
-        tk.Label(name_frame, text="Note Name:", font=("Arial", 11, "bold"), fg=FG_PURPLE, bg=BG_PINK).pack(side="left", padx=(10,5))
-        self.name_entry = tk.Entry(name_frame, font=("Arial", 11), width=30, bg=ENTRY_BG, fg=FG_PURPLE, insertbackground=FG_PURPLE)
+        tk.Label(name_frame, text="Note Name:", font=("Comic Sans MS", 14, "bold"), fg=FG_PURPLE, bg=BG_PINK).pack(side="left", padx=(10,5))
+        self.name_entry = tk.Entry(name_frame, font=("Comic Sans MS", 14), width=30, bg=ENTRY_BG, fg=FG_PURPLE, insertbackground=FG_PURPLE)
         self.name_entry.pack(side="left", padx=(0,10))
 
         # Create frame for buttons
@@ -49,9 +49,16 @@ class NoteApp:
         tk.Button(button_frame, text="Save", width=10, command=self.save_note, bg=BTN_PINK, fg=FG_PURPLE, activebackground=BTN_PURPLE, activeforeground=BG_PINK).pack(side="left", padx=5)
         tk.Button(button_frame, text="Delete", width=10, command=self.delete_note, bg=BTN_PINK, fg=FG_PURPLE, activebackground=BTN_PURPLE, activeforeground=BG_PINK).pack(side="left", padx=5)
 
-        # Text area for typing notes
-        self.text_area = tk.Text(root, wrap="word", font=("Arial", 12), bg=TEXT_BG, fg=FG_PURPLE, insertbackground=FG_PURPLE)
-        self.text_area.pack(expand=True, fill="both", padx=10, pady=10)
+        # Text area for typing notes with lined notebook paper effect
+        self.paper_canvas = tk.Canvas(root, bg=TEXT_BG, highlightthickness=0)
+        self.paper_canvas.pack(expand=True, fill="both", padx=10, pady=10)
+        # Draw horizontal lines for notebook effect
+        for i in range(30):
+            y = 20 + i * 24  # Adjust spacing for font size
+            self.paper_canvas.create_line(10, y, 580, y, fill="#e0aaff", width=2)
+        # Place the text widget on top of the canvas
+        self.text_area = tk.Text(self.paper_canvas, wrap="word", font=("Comic Sans MS", 16), bg=TEXT_BG, fg=FG_PURPLE, insertbackground=FG_PURPLE, borderwidth=0, highlightthickness=0)
+        self.text_window = self.paper_canvas.create_window(20, 20, anchor="nw", window=self.text_area, width=560, height=700)
 
         self.current_file = None
 
