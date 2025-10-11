@@ -17,7 +17,7 @@ from src.gui import App
 
 # Constants for styling and behavior
 INITIAL_TITLE = "Welcome to Your Secret Journal"
-INITIAL_GEOMETRY = "520x280"
+INITIAL_GEOMETRY = "816x503"
 INITIAL_BG = "#fff3fb"
 TEXT_COLOR_TITLE = "#9b1948"
 TEXT_COLOR_DESC = "#a3164a"

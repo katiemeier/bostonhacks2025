@@ -38,17 +38,17 @@ class App:
     """A secure journal application with voice authentication."""
     
     # UI Constants
-    WINDOW_SIZE = "720x880"
-    CANVAS_SIZE = (700, 800)
+    WINDOW_SIZE = "816x503"  # modified from "720x880"
+    CANVAS_SIZE = (796, 280)  # modified from (700, 800)
     NOTEBOOK_PADDING = 40
     
     # Component positions and sizes as dicts for place() method
-    NOTEBOOK_MARGINS = {"x": 110, "y": 300, "width": 500, "height": 340}
-    TITLE_POSITION = {"x": 360, "y": 110}
-    SUBTITLE_POSITION = {"x": 360, "y": 150}
-    STATUS_POSITION = {"x": 110, "y": 220, "width": 500, "height": 60}
-    UNLOCK_BTN_POSITION = {"x": 300, "y": 670, "width": 150, "height": 44}
-    EXIT_BTN_POSITION = {"x": 520, "y": 670, "width": 90, "height": 40}
+    NOTEBOOK_MARGINS = {"x": 20, "y": 20, "width": 756, "height": 240}  # modified from {"x": 110, "y": 300, "width": 500, "height": 340}
+    TITLE_POSITION = {"x": 398, "y": 40}  # modified from {"x": 360, "y": 110}
+    SUBTITLE_POSITION = {"x": 398, "y": 80}  # modified from {"x": 360, "y": 150}
+    STATUS_POSITION = {"x": 10, "y": 300, "width": 796, "height": 30}  # modified from {"x": 110, "y": 220, "width": 500, "height": 60}
+    UNLOCK_BTN_POSITION = {"x": 216, "y": 340, "width": 150, "height": 40}  # modified from {"x": 300, "y": 670, "width": 150, "height": 44}
+    EXIT_BTN_POSITION = {"x": 450, "y": 340, "width": 150, "height": 40}  # modified from {"x": 520, "y": 670, "width": 90, "height": 40}
     
     def __init__(self, master=None):
         """Initialize the application with the main window and UI components."""
