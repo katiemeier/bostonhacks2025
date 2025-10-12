@@ -1,15 +1,18 @@
 BG_PINK = "#ffb6c1"
 FG_PURPLE = "#800080"
-BTN_PINK = "#ff69b4"
 BTN_PURPLE = "#c084fc"
 ENTRY_BG = "#ffe4fa"
-TEXT_BG = "#f3c4fb"
 BLACK = "#000000"
 
 
 import tkinter as tk
 from tkinter import messagebox, filedialog
 from tkinter import font as tkfont
+try:
+    from PIL import Image, ImageTk  # type: ignore
+    _PIL_AVAILABLE = True
+except Exception:
+    _PIL_AVAILABLE = False
 import os
 import datetime
 
@@ -29,8 +32,7 @@ class NoteApp:
                 self.new_note()
                 messagebox.showinfo("Deleted", "Note deleted successfully.")
                 # Refresh TOC after deletion
-                if hasattr(self, 'toc_listbox'):
-                    self._populate_toc()
+                self._populate_toc()
         else:
             messagebox.showwarning("No File", "No note is currently open.")
     def __init__(self, root):
@@ -41,46 +43,41 @@ class NoteApp:
         # spacing between notebook lines (pixels)
         self.line_spacing = 26
 
-        # Main frame for sidebar and content
-        main_frame = tk.Frame(root, bg=BG_PINK)
-        main_frame.pack(fill="both", expand=True)
+        # Background canvas with Frame5.png
+        self.bg_canvas = tk.Canvas(self.root, highlightthickness=0, bd=0)
+        self.bg_canvas.pack(fill="both", expand=True)
+        self._bg_image_raw = None
+        self._bg_image_tk = None
+        # Uniform scaling state (design-space background size, scale and offsets)
+        self.design_w = None
+        self.design_h = None
+        self._s = 1.0
+        self._offx = 0.0
+        self._offy = 0.0
+        self._bg_img_path = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "assets", "Frame5.png"))
+        self._load_background_image()
+        # Repaint background and relayout on resize
+        self.root.bind("<Configure>", self._on_root_resize)
 
-        # Sidebar for table of contents
-        sidebar = tk.Frame(main_frame, width=200, bg=BTN_PINK)
-        sidebar.pack(side="left", fill="y")
-        tk.Label(sidebar, text="Entries", font=("Comic Sans MS", 20, "bold"), fg=FG_PURPLE, bg=BTN_PINK).pack(pady=(10,0))
-        self.toc_listbox = tk.Listbox(sidebar, font=("Comic Sans MS", 12), bg=ENTRY_BG, fg=FG_PURPLE, selectbackground=BTN_PURPLE, selectforeground=BG_PINK, borderwidth=0, highlightthickness=0)
-        self.toc_listbox.pack(fill="both", expand=True, padx=10, pady=10)
-        self.toc_listbox.bind("<<ListboxSelect>>", self._on_toc_select)
-        self._populate_toc()
-
-        # Content frame for note entry and text
-        content_frame = tk.Frame(main_frame, bg=BG_PINK)
-        content_frame.pack(side="left", fill="both", expand=True)
-
-        name_frame = tk.Frame(content_frame, bg=BG_PINK)
-        name_frame.pack(fill="x", pady=(10,0))
-        tk.Label(name_frame, text="Title:", font=("Comic Sans MS", 20, "bold"), fg=FG_PURPLE, bg=BG_PINK).pack(side="left", padx=(10,5))
-        self.name_entry = tk.Entry(name_frame, font=("Comic Sans MS", 14), width=30, bg=ENTRY_BG, fg=FG_PURPLE, insertbackground=FG_PURPLE)
-        self.name_entry.pack(side="left", padx=(0,10))
-
-        # Create frame for buttons
-        button_frame = tk.Frame(content_frame, bg=BG_PINK)
-        button_frame.pack(fill="x", pady=10)
-
-        tk.Button(button_frame, text="New", width=10, command=self.new_note, bg=BTN_PINK, fg=FG_PURPLE, activebackground=BTN_PURPLE, activeforeground=BG_PINK).pack(side="left", padx=5)
-        tk.Button(button_frame, text="Open", width=10, command=self.open_note, bg=BTN_PINK, fg=FG_PURPLE, activebackground=BTN_PURPLE, activeforeground=BG_PINK).pack(side="left", padx=5)
-        tk.Button(button_frame, text="Save", width=10, command=self.save_note, bg=BTN_PINK, fg=FG_PURPLE, activebackground=BTN_PURPLE, activeforeground=BG_PINK).pack(side="left", padx=5)
-        tk.Button(button_frame, text="Delete", width=10, command=self.delete_note, bg=BTN_PINK, fg=FG_PURPLE, activebackground=BTN_PURPLE, activeforeground=BG_PINK).pack(side="left", padx=5)
-
-        # Canvas for notebook and a simple editor
-        self.paper_canvas = tk.Canvas(content_frame, bg=TEXT_BG, highlightthickness=0)
-        self.paper_canvas.pack(expand=True, fill="both", padx=0, pady=0)
-
-        # Simple canvas-based editor state
+        # Layout constants and state for canvas-based UI
+        self.sidebar_width = 200
+    # header_height removed (no explicit header container)
+        # Editor content bounds: start typing at exact x=454; stop lines before right edge
+        self.editor_left = 454
+    # editor_right_margin removed (not used)
+        # Vertical clip within Frame5.png page area
+        self.editor_top = 120
+        self.editor_bottom_margin = 40
+        # Fixed right boundary for editor content and lines
+        self.editor_right = 750
+        # TOC (sidebar) design-space placement
+        self.d_toc_x = 50
+        self.d_toc_y = 100
+        self.d_toc_line_h = 22
+        self.action_buttons = []  # list of dicts: {label, bbox, handler}
+        # Simple editor state (drawn on bg_canvas directly)
         self.editor_font = tkfont.Font(family="Comic Sans MS", size=16)
-        self.text_margin_x = 12
-        self.text_margin_y = 6
+    # text margins removed (not used)
         # Align line spacing to font metrics so caret and notebook lines match
         try:
             self.line_spacing = int(self.editor_font.metrics("linespace") + 4)
@@ -91,30 +88,268 @@ class NoteApp:
         self.cur_row = 0
         self.cur_col = 0
 
-        # Bindings
-        self.paper_canvas.bind("<Configure>", self._on_canvas_resize)
-        self.paper_canvas.bind("<Button-1>", self._on_click)
-        self.paper_canvas.bind("<Key>", self._on_key)
-        # Focus so key events are captured
-        self.paper_canvas.focus_set()
-        self.root.after(10, lambda: self._on_canvas_resize(None))
+        # Populate TOC items (filenames)
+        self._toc_items = []
+        self._populate_toc()
+
+        # Hover state for clickable items
+        self._hover_item = None
+        self._toc_id_to_name = {}
+        self._action_id_to_handler = {}
+
+        # Bindings on the background canvas (single surface)
+        self.bg_canvas.bind("<Button-1>", self._on_click)
+        self.bg_canvas.bind("<Motion>", self._on_mouse_move)
+        self.bg_canvas.bind("<Leave>", self._on_mouse_leave)
+        self.bg_canvas.bind("<Key>", self._on_key)
+        self.bg_canvas.focus_set()
+        self.root.after(10, lambda: (self._layout_on_canvas(), self._redraw_all()))
 
         # Initialize current file state
         self.current_file = None
-    def _on_canvas_resize(self, event):
-        # Redraw editor and lines
+
+        # Inline Title widget state (independent from note content)
+        self.title_var = tk.StringVar()
+        self.title_entry = tk.Entry(
+            self.bg_canvas,
+            textvariable=self.title_var,
+            font=("Comic Sans MS", 14),
+            bg=ENTRY_BG,
+            fg=FG_PURPLE,
+            insertbackground=FG_PURPLE,
+            bd=1,
+            relief="solid",
+            width=30,
+        )
+        self.title_window_id = None
+        # Note: Title is not synced with the note's first line.
+
+    # Background handling
+    def _load_background_image(self):
+        try:
+            if _PIL_AVAILABLE:
+                self._bg_image_raw = Image.open(self._bg_img_path).convert("RGBA")
+                try:
+                    self.design_w, self.design_h = self._bg_image_raw.size
+                except Exception:
+                    self.design_w, self.design_h = None, None
+            else:
+                # Fallback: load base image for zoom/subsample scaling
+                self._bg_image_base = tk.PhotoImage(file=self._bg_img_path)
+                self._bg_image_tk = self._bg_image_base
+                try:
+                    self.design_w = self._bg_image_base.width()
+                    self.design_h = self._bg_image_base.height()
+                except Exception:
+                    self.design_w, self.design_h = None, None
+        except Exception as e:
+            # If image fails to load, leave canvas with default bg
+            self._bg_image_raw = None
+            self._bg_image_tk = None
+            self._bg_image_base = None
+            self.design_w, self.design_h = None, None
+
+    def _compute_scale(self, w: int, h: int):
+        if not self.design_w or not self.design_h:
+            self.design_w = max(1, w)
+            self.design_h = max(1, h)
+        dw, dh = self.design_w, self.design_h
+        s = min(w / dw, h / dh)
+        self._s = s
+        self._offx = (w - dw * s) / 2.0
+        self._offy = (h - dh * s) / 2.0
+
+    def _dx(self, x: float) -> float:
+        return self._offx + x * self._s
+
+    def _dy(self, y: float) -> float:
+        return self._offy + y * self._s
+
+    def _apply_scaled_fonts(self):
+        s = max(0.5, float(self._s))
+        try:
+            self.editor_font.configure(size=max(10, int(round(16 * s))))
+        except Exception:
+            pass
+        try:
+            # Create additional fonts lazily if not set
+            if not hasattr(self, 'action_font'):
+                self.action_font = tkfont.Font(family="Comic Sans MS", size=14, weight="bold")
+            if not hasattr(self, 'toc_font'):
+                self.toc_font = tkfont.Font(family="Comic Sans MS", size=12)
+            if not hasattr(self, 'title_font'):
+                self.title_font = tkfont.Font(family="Comic Sans MS", size=14, weight="bold")
+            sz_action = max(8, int(round(14 * s)))
+            sz_toc = max(8, int(round(12 * s)))
+            self.action_font.configure(size=sz_action, weight="bold")
+            self.title_font.configure(size=sz_action, weight="bold")
+            self.toc_font.configure(size=sz_toc)
+        except Exception:
+            pass
+        try:
+            self.line_spacing = int(self.editor_font.metrics("linespace") + max(2, round(4 * s)))
+        except Exception:
+            self.line_spacing = max(16, int(round(26 * s)))
+
+    def _draw_background(self, w: int, h: int):
+        # Clear previous bg
+        self.bg_canvas.delete("__bg__")
+        if self._bg_image_raw and _PIL_AVAILABLE and w > 0 and h > 0:
+            try:
+                dw = self.design_w or w
+                dh = self.design_h or h
+                sw = max(1, int(round(dw * self._s)))
+                sh = max(1, int(round(dh * self._s)))
+                img = self._bg_image_raw.resize((sw, sh), Image.LANCZOS)
+                self._bg_image_tk = ImageTk.PhotoImage(img)
+                self.bg_canvas.create_image(self._offx, self._offy, image=self._bg_image_tk, anchor="nw", tags=("__bg__",))
+                return
+            except Exception:
+                self._bg_image_tk = None
+        elif getattr(self, "_bg_image_base", None) is not None and w > 0 and h > 0:
+            # Approximate scaling using integer zoom/subsample to fill the canvas
+            try:
+                bw, bh = self._bg_image_base.width(), self._bg_image_base.height()
+                if bw > 0 and bh > 0:
+                    mul = 8
+                    zx = max(1, int(round(self._s * mul)))
+                    scaled = self._bg_image_base.zoom(zx, zx)
+                    self._bg_image_tk = scaled.subsample(mul, mul)
+                    self.bg_canvas.create_image(self._offx, self._offy, image=self._bg_image_tk, anchor="nw", tags=("__bg__",))
+                    return
+                else:
+                    self._bg_image_tk = self._bg_image_base
+            except Exception:
+                self._bg_image_tk = self._bg_image_base
+
+        if self._bg_image_tk:
+            self.bg_canvas.create_image(self._offx, self._offy, image=self._bg_image_tk, anchor="nw", tags=("__bg__",))
+        else:
+            # fallback background color
+            self.bg_canvas.configure(bg=BG_PINK)
+
+    def _layout_on_canvas(self):
+        try:
+            self.bg_canvas.update_idletasks()
+        except Exception:
+            pass
+        w = self.bg_canvas.winfo_width()
+        h = self.bg_canvas.winfo_height()
+        if w <= 0 or h <= 0:
+            return
+        # Redraw everything to fit new size
+        self._redraw_all()
+
+    def _on_root_resize(self, event):
+        # Reposition canvas windows and redraw background
+        self._layout_on_canvas()
+
+    # ====== Drawing on the background canvas ======
+    def _redraw_all(self):
+        # Clear dynamic layers
+        self.bg_canvas.delete("__bg__")
+        self.bg_canvas.delete("toc")
+        self.bg_canvas.delete("actions")
+        self.bg_canvas.delete("notebook_line")
+        self.bg_canvas.delete("editor_text")
+        self.bg_canvas.delete("cursor")
+
+        w = self.bg_canvas.winfo_width()
+        h = self.bg_canvas.winfo_height()
+        if w <= 0 or h <= 0:
+            return
+        # Compute scale and apply font scaling
+        self._compute_scale(w, h)
+        self._apply_scaled_fonts()
+        # Background image
+        self._draw_background(w, h)
+
+        # Sidebar title and items (text only, no backgrounds)
+        self._draw_sidebar()
+
+        # Actions in header area
+        self._draw_actions()
+
+        # Editor area
         self._redraw_editor()
+
+    def _draw_sidebar(self):
+        # Items (scaled from design coordinates)
+        y = self._dy(self.d_toc_y)
+        line_h = self.d_toc_line_h * self._s
+        xpad = self._dx(self.d_toc_x)
+        self._toc_id_to_name = {}
+        for idx, name in enumerate(self._toc_items):
+            item_id = self.bg_canvas.create_text(
+                xpad, y, text=name, font=self.toc_font, fill=FG_PURPLE, anchor="nw",
+                tags=("toc", "toc_item", f"toc_index_{idx}")
+            )
+            self._toc_id_to_name[item_id] = name
+            y += line_h
+
+    def _draw_actions(self):
+        # Render actions as clickable text; store hitboxes
+        labels = [
+            ("New", self.new_note),
+            ("Open", self.open_note),
+            ("Save", self.save_note),
+            ("Delete", self.delete_note),
+        ]
+        self.action_buttons = []
+        self._action_id_to_handler = {}
+        x = self._dx(self.sidebar_width + 12)
+        y = self._dy(12)
+        spacing = 80 * self._s
+        for label, handler in labels:
+            item_id = self.bg_canvas.create_text(
+                x, y, text=label, font=self.action_font, fill=FG_PURPLE, anchor="nw",
+                tags=("actions", "action_item", f"action_{label}")
+            )
+            bbox = self.bg_canvas.bbox(item_id)
+            self.action_buttons.append({"label": label, "bbox": bbox, "handler": handler, "item_id": item_id})
+            self._action_id_to_handler[item_id] = handler
+            x += spacing
+
+        # Add a non-clickable Title label near the typing boundary (~454 px), moved up by 50px
+        try:
+            title_x = self._dx(self.editor_left)
+        except Exception:
+            title_x = self._dx(454)
+        title_y = self._dy(12 + 50)
+        title_item = self.bg_canvas.create_text(
+            title_x, title_y, text="Title:", font=self.title_font, fill=BLACK, anchor="nw",
+            tags=("actions", "title_label")
+        )
+        # Position the inline Entry to the right of the Title label
+        tbbox = self.bg_canvas.bbox(title_item)
+        if tbbox:
+            entry_x = tbbox[2] + 10
+        else:
+            entry_x = title_x + 60 * self._s
+        # Ensure the right end of the title box is at design x=700
+        target_right = self._dx(700)
+        entry_width_px = max(20, int(round(target_right - entry_x)))
+        if self.title_window_id is None:
+            self.title_window_id = self.bg_canvas.create_window(
+                entry_x, title_y - 2, anchor="nw", window=self.title_entry, width=entry_width_px
+            )
+        else:
+            self.bg_canvas.coords(self.title_window_id, entry_x, title_y - 2)
+            try:
+                self.bg_canvas.itemconfigure(self.title_window_id, width=entry_width_px)
+            except Exception:
+                pass
+            try:
+                self.bg_canvas.tag_raise(self.title_window_id)
+            except Exception:
+                pass
 
     def _draw_notebook_lines(self):
         # Remove previous lines
-        self.paper_canvas.delete("notebook_line")
-        # Ensure geometry is up to date before querying size
-        try:
-            self.paper_canvas.update_idletasks()
-        except Exception:
-            pass
-        w = self.paper_canvas.winfo_width()
-        h = self.paper_canvas.winfo_height()
+        self.bg_canvas.delete("notebook_line")
+        # Canvas size
+        w = self.bg_canvas.winfo_width()
+        h = self.bg_canvas.winfo_height()
         if w <= 0 or h <= 0:
             return
         # Start lines at the text baseline for row 0 so they visually align
@@ -122,30 +357,38 @@ class NoteApp:
             baseline_offset = self.editor_font.metrics("ascent") + 2
         except Exception:
             baseline_offset = int(self.line_spacing * 0.75)
-        y = self.text_margin_y + baseline_offset
-        while y < h:
-            self.paper_canvas.create_line(
-                0, y, w, y, fill=BLACK, width=2, tags=("notebook_line",)
+        content_x = self._dx(self.editor_left)
+        y = self._dy(self.editor_top) + baseline_offset
+        if self.design_h:
+            bottom_limit = min(h, int(round(self._dy(self.design_h - self.editor_bottom_margin))))
+        else:
+            bottom_limit = max(0, h - int(round(self.editor_bottom_margin * self._s)))
+        while y < bottom_limit:
+            right = min(self._dx(self.editor_right), w)
+            self.bg_canvas.create_line(
+                content_x, y, right, y, fill=BLACK, width=max(1, int(round(2 * self._s))), tags=("notebook_line",)
             )
             y += self.line_spacing
-        # Ensure lines are visible above the text window
-        try:
-            # Raise lines to the absolute top so they are visible
-            self.paper_canvas.tag_raise("notebook_line")
-        except Exception:
-            pass
+        # Keep lines behind text, but visible
 
     def _redraw_editor(self):
         # Clear previous text and cursor
-        self.paper_canvas.delete("editor_text")
-        self.paper_canvas.delete("cursor")
+        self.bg_canvas.delete("editor_text")
+        self.bg_canvas.delete("cursor")
         # Draw lines first
         self._draw_notebook_lines()
-        # Draw text lines
-        line_y = self.text_margin_y
+        # Draw text lines on bg_canvas with content offset
+        content_x = self._dx(self.editor_left)
+        line_y = self._dy(self.editor_top)
+        if self.design_h:
+            bottom_limit = min(self.bg_canvas.winfo_height(), int(round(self._dy(self.design_h - self.editor_bottom_margin))))
+        else:
+            bottom_limit = max(0, self.bg_canvas.winfo_height() - int(round(self.editor_bottom_margin * self._s)))
         for i, line in enumerate(self._lines):
-            self.paper_canvas.create_text(
-                self.text_margin_x,
+            if line_y >= bottom_limit:
+                break
+            self.bg_canvas.create_text(
+                content_x,
                 line_y,
                 anchor="nw",
                 text=line,
@@ -159,40 +402,109 @@ class NoteApp:
 
     def _draw_cursor(self):
         # Compute cursor pixel position
-        x = self.text_margin_x
-        y = self.text_margin_y + self.cur_row * self.line_spacing
+        content_x = self._dx(self.editor_left)
+        x = content_x
+        y = self._dy(self.editor_top) + self.cur_row * self.line_spacing
         if 0 <= self.cur_row < len(self._lines):
             prefix = self._lines[self.cur_row][: self.cur_col]
             x += self.editor_font.measure(prefix)
         # Caret as a vertical line
-        self.paper_canvas.create_line(
+        self.bg_canvas.create_line(
             x,
             y + 2,
             x,
             y + self.line_spacing - 4,
             fill=FG_PURPLE,
-            width=2,
+            width=max(1, int(round(2 * self._s))),
             tags=("cursor",),
         )
 
     def _on_click(self, event):
         # Focus canvas to receive key events
-        self.paper_canvas.focus_set()
-        # Set cursor from click position
-        row = max(0, min(int((event.y - self.text_margin_y) // self.line_spacing), len(self._lines) - 1))
-        line = self._lines[row]
-        # Determine column by measuring substrings
-        col = 0
-        x_rel = max(0, event.x - self.text_margin_x)
-        # Iterate characters to find closest column
-        for i in range(len(line) + 1):
-            w = self.editor_font.measure(line[:i])
-            if w >= x_rel:
+        self.bg_canvas.focus_set()
+        x, y = event.x, event.y
+        # Prefer item-id based targeting for accuracy
+        item = self._find_clickable_item_at(x, y)
+        if item:
+            tags = self.bg_canvas.gettags(item)
+            if "action_item" in tags:
+                handler = self._action_id_to_handler.get(item)
+                if handler:
+                    handler()
+                    return
+            if "toc_item" in tags:
+                name = self._toc_id_to_name.get(item)
+                if name:
+                    self._open_note_by_name(name)
+                    return
+        # Editor click: set cursor
+        content_x = self._dx(self.editor_left)
+        top_y = self._dy(self.editor_top)
+        if self.design_h:
+            bottom_limit = min(self.bg_canvas.winfo_height(), int(round(self._dy(self.design_h - self.editor_bottom_margin))))
+        else:
+            bottom_limit = max(0, self.bg_canvas.winfo_height() - int(round(self.editor_bottom_margin * self._s)))
+        if (y >= top_y) and (y < bottom_limit):
+            row = max(0, min(int((y - top_y) // self.line_spacing), len(self._lines) - 1))
+            line = self._lines[row]
+            col = 0
+            x_rel = max(0, x - content_x)
+            for i in range(len(line) + 1):
+                w = self.editor_font.measure(line[:i])
+                if w >= x_rel:
+                    col = i
+                    break
                 col = i
-                break
-            col = i
-        self.cur_row, self.cur_col = row, col
-        self._redraw_editor()
+            self.cur_row, self.cur_col = row, col
+            self._redraw_editor()
+
+    def _find_clickable_item_at(self, x: int, y: int):
+        # Return top-most clickable item id at x,y or None
+        ids = self.bg_canvas.find_overlapping(x, y, x, y)
+        for item in reversed(ids):  # last is top-most
+            tags = self.bg_canvas.gettags(item)
+            if tags and ("action_item" in tags or "toc_item" in tags):
+                return item
+        return None
+
+    def _on_mouse_move(self, event):
+        item = self._find_clickable_item_at(event.x, event.y)
+        if item != getattr(self, "_hover_item", None):
+            self._clear_hover()
+            if item:
+                self._apply_hover(item)
+                self._hover_item = item
+                self.bg_canvas.configure(cursor="hand2")
+            else:
+                self.bg_canvas.configure(cursor="")
+
+    def _on_mouse_leave(self, event):
+        self._clear_hover()
+        self.bg_canvas.configure(cursor="")
+
+    def _clear_hover(self):
+        item = getattr(self, "_hover_item", None)
+        if item and self._canvas_item_exists(item):
+            tags = self.bg_canvas.gettags(item)
+            # Reset to default color
+            try:
+                self.bg_canvas.itemconfigure(item, fill=FG_PURPLE)
+            except Exception:
+                pass
+        self._hover_item = None
+
+    def _apply_hover(self, item):
+        # Apply a highlight color when hovering
+        try:
+            self.bg_canvas.itemconfigure(item, fill=BTN_PURPLE)
+        except Exception:
+            pass
+
+    def _canvas_item_exists(self, item_id: int) -> bool:
+        try:
+            return item_id in self.bg_canvas.find_all()
+        except Exception:
+            return False
 
     def _on_key(self, event):
         ks = event.keysym
@@ -242,20 +554,25 @@ class NoteApp:
             line = self._lines[self.cur_row]
             self._lines[self.cur_row] = line[: self.cur_col] + ch + line[self.cur_col :]
             self.cur_col += 1
+            # Enforce wrapping within editor bounds
+            self._wrap_line_at(self.cur_row)
         else:
             return "break"
         self._redraw_editor()
+
+    
     def _populate_toc(self):
-        self.toc_listbox.delete(0, tk.END)
         notes = [f for f in os.listdir(NOTES_DIR) if f.endswith('.md')]
-        for note in sorted(notes):
-            self.toc_listbox.insert(tk.END, note)
+        self._toc_items = sorted(notes)
+        # Redraw to reflect new list
+        try:
+            self._redraw_all()
+        except Exception:
+            pass
 
     def _on_toc_select(self, event):
-        selection = self.toc_listbox.curselection()
-        if selection:
-            filename = self.toc_listbox.get(selection[0])
-            self._open_note_by_name(filename)
+        # Not used in canvas-based sidebar
+        pass
 
     def _open_note_by_name(self, filename):
         file_path = os.path.join(NOTES_DIR, filename)
@@ -265,18 +582,21 @@ class NoteApp:
                 self._set_text(content)
                 self.current_file = file_path
                 base = os.path.basename(file_path)
-                name, _ = os.path.splitext(base)
-                self.name_entry.delete(0, tk.END)
-                self.name_entry.insert(0, name)
                 self.root.title(f"Simple Note App - {base}")
+                # Set title box from filename (without extension)
+                try:
+                    name_wo_ext = os.path.splitext(base)[0]
+                except Exception:
+                    name_wo_ext = base
+                self.title_var.set(name_wo_ext)
 
 
     def new_note(self):
         """Clears the text area for a new note and resets the name field."""
         self._set_text("")
-        self.name_entry.delete(0, tk.END)
         self.current_file = None
         self.root.title("Simple Note App - New Note")
+        self.title_var.set("")
 
     def open_note(self):
         """Opens a saved note from the notes folder."""
@@ -291,13 +611,27 @@ class NoteApp:
                 content = file.read()
                 self._set_text(content)
                 self.current_file = file_path
-                self.root.title(f"Simple Note App - {os.path.basename(file_path)}")
+                base = os.path.basename(file_path)
+                self.root.title(f"Simple Note App - {base}")
+                # Set title box from filename (without extension)
+                try:
+                    name_wo_ext = os.path.splitext(base)[0]
+                except Exception:
+                    name_wo_ext = base
+                self.title_var.set(name_wo_ext)
 
     def save_note(self):
-        """Saves the note to a file in the notes folder using the entered name or a timestamp. Always uses .md extension."""
-        note_name = self.name_entry.get().strip()
+        """Saves the note to the notes folder.
+
+        The filename is derived from the Title box (max 40 chars),
+        or falls back to a timestamp. Always uses .md extension.
+        """
+        # Derive note name: use Title box, else timestamp
+        raw_title = (self.title_var.get() or "").strip()
+        # Normalize single-line title
+        raw_title = raw_title.replace("\n", " ")
+        note_name = raw_title[:40] if raw_title else ""
         if not note_name:
-            # Use timestamp if no name entered
             note_name = datetime.datetime.now().strftime("note_%Y%m%d_%H%M%S")
         # Remove invalid filename characters
         note_name = "".join(c for c in note_name if c.isalnum() or c in (' ', '_', '-')).rstrip()
@@ -314,43 +648,97 @@ class NoteApp:
         self.root.title(f"Simple Note App - {filename}")
         messagebox.showinfo("Saved", "Your note has been saved successfully.")
         # Refresh TOC after save
-        if hasattr(self, 'toc_listbox'):
-            self._populate_toc()
+        self._populate_toc()
 
-    def open_note(self):
-        """Opens a saved note from the notes folder and fills the name field."""
-        file_path = filedialog.askopenfilename(
-            title="Open Note",
-            initialdir=NOTES_DIR,
-            defaultextension=".md",
-            filetypes=[("Markdown Files", "*.md"), ("All Files", "*.*")]
-        )
-        if file_path:
-            with open(file_path, "r", encoding="utf-8") as file:
-                content = file.read()
-                self._set_text(content)
-                self.current_file = file_path
-                # Set the name field to the filename (without extension)
-                base = os.path.basename(file_path)
-                name, _ = os.path.splitext(base)
-                self.name_entry.delete(0, tk.END)
-                self.name_entry.insert(0, name)
-                self.root.title(f"Simple Note App - {base}")
+    # Removed second open_note variant; single method remains
 
     # Editor helpers
     def _set_text(self, text: str):
         lines = text.split("\n") if text else [""]
         if not lines:
             lines = [""]
-        self._lines = lines
+        # Wrap incoming text to fit editor width
+        wrapped: list[str] = []
+        for ln in lines:
+            wrapped.extend(self._wrap_text_to_width(ln))
+        if not wrapped:
+            wrapped = [""]
+        self._lines = wrapped
         self.cur_row = 0
         self.cur_col = 0
         self._redraw_editor()
 
     def _get_text(self) -> str:
         return "\n".join(self._lines)
-if not os.path.exists(NOTES_DIR):
-    os.makedirs(NOTES_DIR)
+
+    # ====== Wrapping helpers ======
+    def _max_text_width(self) -> int:
+        # Current pixel width between scaled editor left and right bounds
+        return max(0, int(round((self.editor_right - self.editor_left) * getattr(self, "_s", 1.0))))
+
+    def _wrap_text_to_width(self, text_line: str) -> list[str]:
+        """Wrap a single line of text to fit within the editor width by measuring pixels.
+        Tries to wrap on spaces; if no space, performs a hard break.
+        """
+        maxw = self._max_text_width()
+        if maxw <= 0:
+            return [text_line]
+        out = []
+        s = text_line
+        while s:
+            # If it already fits, append and stop
+            if self.editor_font.measure(s) <= maxw:
+                out.append(s)
+                break
+            # Find the largest prefix that fits
+            lo, hi = 0, len(s)
+            fit = 0
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                if self.editor_font.measure(s[:mid]) <= maxw:
+                    fit = mid
+                    lo = mid + 1
+                else:
+                    hi = mid - 1
+            # Try to wrap at last space before fit
+            break_at = s.rfind(" ", 0, max(1, fit))
+            if break_at <= 0:
+                break_at = max(1, fit)
+            out.append(s[:break_at].rstrip())
+            s = s[break_at:].lstrip()
+        if not out:
+            out = [""]
+        return out
+
+    def _wrap_line_at(self, row: int):
+        """Ensure the line at index row fits; wrap overflow to subsequent lines.
+        Adjusts current cursor position if it falls into wrapped segments.
+        """
+        if row < 0 or row >= len(self._lines):
+            return
+        maxw = self._max_text_width()
+        if maxw <= 0:
+            return
+        line = self._lines[row]
+        # If it fits, nothing to do
+        if self.editor_font.measure(line) <= maxw:
+            return
+        # Wrap this line into segments
+        segments = self._wrap_text_to_width(line)
+        # Replace current line and insert the rest
+        self._lines[row] = segments[0]
+        for i, seg in enumerate(segments[1:], start=1):
+            self._lines.insert(row + i, seg)
+        # Adjust cursor if it exceeds first segment
+        if self.cur_row == row:
+            # Recompute cur_col relative to first segment length
+            first_len = len(self._lines[row])
+            if self.cur_col > first_len:
+                remaining = self.cur_col - first_len
+                self.cur_row = row + 1
+                self.cur_col = min(remaining, len(self._lines[self.cur_row]))
+
+    
 
 if __name__ == "__main__":
     print("App started")
