@@ -105,55 +105,72 @@ class Launcher:
             print(f'Error opening note app: {e}')
 
     def _run_initial_setup_window(self):
-        """Create and run the initial setup window for voice enrollment with background, voice button, and Comic Sans instructions."""
+        """Show intro_screen.png and a centered animated microphone button for enrollment."""
         init_root = tk.Tk()
         init_root.title(INITIAL_TITLE)
         init_root.geometry(INITIAL_GEOMETRY)
+        init_root.resizable(False, False)
 
-        # Use a canvas to draw the background image
+        # Load intro image
+        try:
+            intro_img = tk.PhotoImage(file="assets/intro_screen.png")
+        except Exception:
+            intro_img = None
+
         canvas = tk.Canvas(init_root, width=816, height=503, highlightthickness=0, bd=0)
         canvas.pack(fill="both", expand=True)
+        if intro_img:
+            canvas.create_image(0, 0, image=intro_img, anchor="nw")
+        else:
+            canvas.configure(bg=INITIAL_BG)
+
+
+
+        # Load and resize button image using PIL
         try:
             from PIL import Image, ImageTk
-            bg_pil = Image.open("assets/intro_screen.png").convert("RGBA")
-            bg_scaled = bg_pil.resize((816, 503), Image.LANCZOS)
-            bg_img = ImageTk.PhotoImage(bg_scaled)
-            canvas.create_image(0, 0, image=bg_img, anchor="nw")
+            pil_img = Image.open("assets/talk_button.png")
+            pil_img = pil_img.resize((64, 64), Image.LANCZOS)
+            btn_img = ImageTk.PhotoImage(pil_img)
         except Exception:
-            bg_img = tk.PhotoImage(file="assets/intro_screen.png")
-            canvas.create_image(0, 0, image=bg_img, anchor="nw")
+            btn_img = None
 
-        # Load and place the voice button (64x64px, 20px below center)
-        try:
-            from PIL import Image, ImageTk
-            btn_pil = Image.open("assets/talk_button.png").convert("RGBA")
-            btn_scaled = btn_pil.resize((64, 64), Image.LANCZOS)
-            btn_img = ImageTk.PhotoImage(btn_scaled)
-        except Exception:
-            btn_img = tk.PhotoImage(file="assets/talk_button.png")
-        center_x = 816 // 2
-        center_y = 503 // 2 + 20
-        voice_btn = canvas.create_image(center_x, center_y, image=btn_img, anchor="center")
+        # Button position (20 pixels below center)
+        cx, cy = 816 // 2, (503 // 2) + 20
 
-        # Comic Sans text below button
-        text_y = center_y + 44
-        text_id = canvas.create_text(center_x, text_y, text="Click then say your password aloud", font=("Comic Sans MS", 16), fill="#d6336c", anchor="n")
+        def on_press(event=None):
+            start_enroll()
 
-        # Button click handler
-        def start_enroll(_evt=None):
-            canvas.itemconfig(voice_btn, state="disabled")
-            canvas.itemconfig(text_id, text="Listening")
+        def start_enroll():
+            # Disable button during enroll
+            canvas.tag_unbind("mic_btn", "<Button-1>")
+            # Show status text
+            status_id = canvas.create_text(cx, cy + 60, text="Listening for password...", font=("Helvetica", 14), fill="#000000", tags="status")
             def worker():
                 try:
                     res = voice_unlock.enroll()
                     if res:
-                        init_root.after(500, init_root.destroy)
-                except Exception:
-                    pass
+                        canvas.itemconfig(status_id, text="Enrollment successful! Opening app...")
+                        init_root.after(800, init_root.destroy)
+                    else:
+                        canvas.itemconfig(status_id, text="Enrollment failed. Try again.")
+                        init_root.after(1500, lambda: reset_button())
+                except Exception as e:
+                    canvas.itemconfig(status_id, text=f"Enrollment error: {e}")
+                    init_root.after(1500, lambda: reset_button())
             threading.Thread(target=worker, daemon=True).start()
-        canvas.tag_bind(voice_btn, "<Button-1>", start_enroll)
-        canvas.tag_bind(voice_btn, "<Enter>", lambda e: init_root.configure(cursor="hand2"))
-        canvas.tag_bind(voice_btn, "<Leave>", lambda e: init_root.configure(cursor=""))
+
+        def reset_button():
+            canvas.delete("status")
+            canvas.tag_bind("mic_btn", "<Button-1>", on_press)
+
+        # Draw button (smaller, lower, no depressed version)
+        if btn_img:
+            btn_item = canvas.create_image(cx, cy, image=btn_img, anchor="center", tags="mic_btn")
+        else:
+            btn_width, btn_height = 64, 64
+            btn_item = canvas.create_oval(cx-btn_width//2, cy-btn_height//2, cx+btn_width//2, cy+btn_height//2, fill="#ff7fbf", outline="", tags="mic_btn")
+        canvas.tag_bind("mic_btn", "<Button-1>", on_press)
 
         init_root.mainloop()
 
