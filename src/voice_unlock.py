@@ -61,7 +61,7 @@ def verify():
             attempt = get_embedding(attempt_path)
             score = similarity(authorized, attempt)
             print(f"🔍 Voice similarity score: {score:.3f}")
-            if score > 0.99:
+            if score > 0.75:
                 print("✅ Access Granted! Your secret journal is unlocked 💖")
                 try:
                     from src.play_sound import play_sound

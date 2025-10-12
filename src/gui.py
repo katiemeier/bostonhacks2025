@@ -194,6 +194,7 @@ class App:
 
         red_path = "assets/redlight_off.png"
         green_path = "assets/greenlight_off.png"
+        red_on_path = "assets/redlight_on.png"
 
         # Load images with PIL if available to preserve alpha
         try:
@@ -202,9 +203,19 @@ class App:
                 green_img = Image.open(green_path).convert("RGBA")
                 self._img_red_off = ImageTk.PhotoImage(red_img)
                 self._img_green_off = ImageTk.PhotoImage(green_img)
+                # Preload the ON image for blink overlay
+                try:
+                    red_on_img = Image.open(red_on_path).convert("RGBA")
+                    self._img_red_on = ImageTk.PhotoImage(red_on_img)
+                except Exception:
+                    self._img_red_on = None
             else:
                 self._img_red_off = tk.PhotoImage(file=red_path)
                 self._img_green_off = tk.PhotoImage(file=green_path)
+                try:
+                    self._img_red_on = tk.PhotoImage(file=red_on_path)
+                except Exception:
+                    self._img_red_on = None
         except Exception:
             # If either image fails to load, silently skip drawing
             self._img_red_off = None
@@ -219,6 +230,107 @@ class App:
             self._item_green_off = self.canvas_main.create_image(460, 327, image=self._img_green_off, anchor="center")
         except Exception:
             self._item_green_off = None
+
+    def _ensure_red_on_image(self):
+        """Ensure the red ON image is loaded for blinking."""
+        if getattr(self, "_img_red_on", None) is not None:
+            return True
+        path = "assets/redlight_on.png"
+        try:
+            if _PIL_AVAILABLE:
+                img = Image.open(path).convert("RGBA")
+                self._img_red_on = ImageTk.PhotoImage(img)
+            else:
+                self._img_red_on = tk.PhotoImage(file=path)
+            return True
+        except Exception:
+            self._img_red_on = None
+            return False
+
+    def _blink_red_light(self, times: int = 2, on_ms: int = 180, off_ms: int = 140):
+        """Blink the red light ON image over the red OFF position.
+
+        - Non-blocking UI using after(); safe to call multiple times.
+        - If a blink is already in progress, it restarts the sequence.
+        """
+        # Validate canvas and base position
+        canvas = getattr(self, "canvas_main", None)
+        base_item = getattr(self, "_item_red_off", None)
+        if not canvas or not base_item:
+            return
+
+        # Ensure ON image is available
+        if not self._ensure_red_on_image():
+            return
+
+        # Determine coordinates of the OFF light to overlay exactly
+        try:
+            coords = canvas.coords(base_item)
+            if not coords:
+                return
+            x, y = coords[0], coords[1]
+        except Exception:
+            return
+
+        # Create (or move) an overlay item we can toggle hidden/normal
+        overlay = getattr(self, "_item_red_on_overlay", None)
+        try:
+            if overlay is None:
+                self._item_red_on_overlay = canvas.create_image(
+                    x, y, image=self._img_red_on, anchor="center", state="hidden"
+                )
+            else:
+                # Move overlay to correct position if needed and ensure correct image
+                try:
+                    canvas.coords(self._item_red_on_overlay, x, y)
+                    canvas.itemconfigure(self._item_red_on_overlay, image=self._img_red_on)
+                except Exception:
+                    pass
+        except Exception:
+            return
+
+        # Cancel any existing scheduled blink
+        after_id = getattr(self, "_red_blink_after_id", None)
+        if after_id is not None:
+            try:
+                self.master.after_cancel(after_id)
+            except Exception:
+                pass
+            self._red_blink_after_id = None
+
+        self._red_blinking = True
+
+        total_steps = max(1, int(times)) * 2  # on/off pairs
+
+        def step(i: int = 0):
+            if i >= total_steps:
+                # Ensure overlay is hidden at the end
+                try:
+                    canvas.itemconfigure(self._item_red_on_overlay, state="hidden")
+                except Exception:
+                    pass
+                self._red_blinking = False
+                self._red_blink_after_id = None
+                return
+            try:
+                if i % 2 == 0:
+                    # ON
+                    canvas.itemconfigure(self._item_red_on_overlay, state="normal")
+                    delay = on_ms
+                else:
+                    # OFF
+                    canvas.itemconfigure(self._item_red_on_overlay, state="hidden")
+                    delay = off_ms
+            except Exception:
+                # If something goes wrong, stop attempting
+                self._red_blinking = False
+                self._red_blink_after_id = None
+                return
+            # Schedule next toggle
+            self._red_blink_after_id = self.master.after(delay, lambda: step(i + 1))
+
+        # Start the sequence
+        step(0)
 
     def _load_unlock_image_scaled(self, width: int, height: int):
         """Load the talk_button image scaled to exact width/height, preserving transparency.
@@ -387,6 +499,11 @@ class App:
             self._unlock_journal()
         elif status == "denied":
             self.set_status(f"❌ Access Denied. Similarity: {score:.3f}")
+            # Blink the red light twice to indicate denial
+            try:
+                self._blink_red_light(times=2)
+            except Exception:
+                pass
         else:
             self.set_status(result.get("message", "Unknown result"))
 
