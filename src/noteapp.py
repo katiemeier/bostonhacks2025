@@ -1,3 +1,4 @@
+
 BG_PINK = "#ffb6c1"
 FG_PURPLE = "#800080"
 BTN_PINK = "#ff69b4"
@@ -6,42 +7,33 @@ ENTRY_BG = "#ffe4fa"
 TEXT_BG = "#f3c4fb"
 BLACK = "#000000"
 
-
 import tkinter as tk
-from tkinter import messagebox, filedialog
+from tkinter import messagebox, filedialog, font
 import os
 import datetime
 
 NOTES_DIR = "notes"
 
-# Ensure notes directory exists
 if not os.path.exists(NOTES_DIR):
     os.makedirs(NOTES_DIR)
 
+
 class NoteApp:
-    def delete_note(self):
-        """Deletes the current note file from the notes folder."""
-        if self.current_file and os.path.exists(self.current_file):
-            confirm = messagebox.askyesno("Delete Note", "Are you sure you want to delete this note?")
-            if confirm:
-                os.remove(self.current_file)
-                self.new_note()
-                messagebox.showinfo("Deleted", "Note deleted successfully.")
-                # Refresh TOC after deletion
-                if hasattr(self, 'toc_listbox'):
-                    self._populate_toc()
-        else:
-            messagebox.showwarning("No File", "No note is currently open.")
     def __init__(self, root):
         self.root = root
-        self.root.title("Simple Note App")
+        self.root.title("Secret Journal")
         self.root.geometry("816x503")
         self.root.configure(bg=BG_PINK)
-        # spacing between notebook lines (pixels)
         self.line_spacing = 26
 
+        # Custom fonts
+        self.title_font = font.Font(family="Comic Sans MS", size=32, weight="bold")
+        self.header_font = font.Font(family="Comic Sans MS", size=24, weight="bold")
+        self.entry_font = font.Font(family="Comic Sans MS", size=16)
+        self.journal_font = font.Font(family="Comic Sans MS", size=16)
+
         # Main frame for sidebar and content
-        main_frame = tk.Frame(root, bg=BG_PINK)
+        main_frame = tk.Frame(self.root, bg=BG_PINK)
         main_frame.pack(fill="both", expand=True)
 
         # Sidebar for table of contents
@@ -94,6 +86,7 @@ class NoteApp:
 
         # Initialize current file state
         self.current_file = None
+
     def _on_canvas_resize(self, event):
         w = self.paper_canvas.winfo_width()
         h = self.paper_canvas.winfo_height()
@@ -122,6 +115,25 @@ class NoteApp:
             self.paper_canvas.tag_raise("notebook_line")
         except Exception:
             pass
+
+    def run(self):
+        self.root.mainloop()
+
+
+    def delete_note(self):
+        """Deletes the current note file from the notes folder."""
+        if self.current_file and os.path.exists(self.current_file):
+            confirm = messagebox.askyesno("Delete Note", "Are you sure you want to delete this note?")
+            if confirm:
+                os.remove(self.current_file)
+                self.new_note()
+                messagebox.showinfo("Deleted", "Note deleted successfully.")
+                # Refresh TOC after deletion
+                if hasattr(self, 'toc_listbox'):
+                    self._populate_toc()
+        else:
+            messagebox.showwarning("No File", "No note is currently open.")
+
     def _populate_toc(self):
         self.toc_listbox.delete(0, tk.END)
         notes = [f for f in os.listdir(NOTES_DIR) if f.endswith('.md')]
@@ -146,55 +158,14 @@ class NoteApp:
                 name, _ = os.path.splitext(base)
                 self.name_entry.delete(0, tk.END)
                 self.name_entry.insert(0, name)
-                self.root.title(f"Simple Note App - {base}")
-
+                self.root.title(f"Secret Journal - {base}")
 
     def new_note(self):
         """Clears the text area for a new note and resets the name field."""
         self.text_area.delete(1.0, tk.END)
         self.name_entry.delete(0, tk.END)
         self.current_file = None
-        self.root.title("Simple Note App - New Note")
-
-    def open_note(self):
-        """Opens a saved note from the notes folder."""
-        file_path = filedialog.askopenfilename(
-            title="Open Note",
-            initialdir=NOTES_DIR,
-            defaultextension=".md",
-            filetypes=[("Markdown Files", "*.md"), ("All Files", "*.*")]
-        )
-        if file_path:
-            with open(file_path, "r", encoding="utf-8") as file:
-                content = file.read()
-                self.text_area.delete(1.0, tk.END)
-                self.text_area.insert(tk.END, content)
-                self.current_file = file_path
-                self.root.title(f"Simple Note App - {os.path.basename(file_path)}")
-
-    def save_note(self):
-        """Saves the note to a file in the notes folder using the entered name or a timestamp. Always uses .md extension."""
-        note_name = self.name_entry.get().strip()
-        if not note_name:
-            # Use timestamp if no name entered
-            note_name = datetime.datetime.now().strftime("note_%Y%m%d_%H%M%S")
-        # Remove invalid filename characters
-        note_name = "".join(c for c in note_name if c.isalnum() or c in (' ', '_', '-')).rstrip()
-        # Ensure .md extension
-        if not note_name.lower().endswith('.md'):
-            filename = f"{note_name}.md"
-        else:
-            filename = note_name
-        self.current_file = os.path.join(NOTES_DIR, filename)
-
-        with open(self.current_file, "w", encoding="utf-8") as file:
-            file.write(self.text_area.get(1.0, tk.END).strip())
-
-        self.root.title(f"Simple Note App - {filename}")
-        messagebox.showinfo("Saved", "Your note has been saved successfully.")
-        # Refresh TOC after save
-        if hasattr(self, 'toc_listbox'):
-            self._populate_toc()
+        self.root.title("Secret Journal - New Note")
 
     def open_note(self):
         """Opens a saved note from the notes folder and fills the name field."""
@@ -215,12 +186,33 @@ class NoteApp:
                 name, _ = os.path.splitext(base)
                 self.name_entry.delete(0, tk.END)
                 self.name_entry.insert(0, name)
-                self.root.title(f"Simple Note App - {base}")
-if not os.path.exists(NOTES_DIR):
-    os.makedirs(NOTES_DIR)
+                self.root.title(f"Secret Journal - {base}")
+
+    def save_note(self):
+        """Saves the note to a file in the notes folder using the entered name or a timestamp. Always uses .md extension."""
+        note_name = self.name_entry.get().strip()
+        if not note_name:
+            # Use timestamp if no name entered
+            note_name = datetime.datetime.now().strftime("note_%Y%m%d_%H%M%S")
+        # Remove invalid filename characters
+        note_name = "".join(c for c in note_name if c.isalnum() or c in (' ', '_', '-')).rstrip()
+        # Ensure .md extension
+        if not note_name.lower().endswith('.md'):
+            filename = f"{note_name}.md"
+        else:
+            filename = note_name
+        self.current_file = os.path.join(NOTES_DIR, filename)
+
+        with open(self.current_file, "w", encoding="utf-8") as file:
+            file.write(self.text_area.get(1.0, tk.END).strip())
+
+        self.root.title(f"Secret Journal - {filename}")
+        messagebox.showinfo("Saved", "Your note has been saved successfully.")
+        # Refresh TOC after save
+        if hasattr(self, 'toc_listbox'):
+            self._populate_toc()
 
 if __name__ == "__main__":
-    print("App started")
     root = tk.Tk()
     app = NoteApp(root)
-    root.mainloop()
+    app.run()
