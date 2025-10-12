@@ -1,5 +1,5 @@
 """
-Lightweight launcher that composes `gui.py` and `voice_unlock.py`.
+Lighweight launcher that composes `gui.py` and `voice_unlock.py`.
 
 Behavior:
 - Imports the GUI App from `gui.py` and voice functions from `voice_unlock.py`.
