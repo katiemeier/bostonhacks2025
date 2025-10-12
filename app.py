@@ -56,6 +56,16 @@ class Launcher:
     def _open_note_app(self):
         """Destroy current window and launch note app."""
         try:
+            # Capture whether the current app window is in fullscreen (or equivalent)
+            was_fullscreen = False
+            try:
+                if hasattr(self.app, "is_fullscreen_like") and callable(self.app.is_fullscreen_like):
+                    was_fullscreen = bool(self.app.is_fullscreen_like())
+                else:
+                    # fallback minimal check
+                    was_fullscreen = bool(self.app.master.attributes("-fullscreen"))
+            except Exception:
+                was_fullscreen = False
             try:
                 note_module = import_module('src.noteapp')
                 NoteApp = getattr(note_module, 'NoteApp', None)
@@ -70,6 +80,13 @@ class Launcher:
                     pass
 
                 top = tk.Toplevel(self.app.master)
+                # If we were fullscreen at unlock, force the note window fullscreen too
+                try:
+                    if was_fullscreen:
+                        # macOS honors -fullscreen; ensure it's applied after window creation
+                        top.attributes("-fullscreen", True)
+                except Exception:
+                    pass
                 NoteApp(top)
 
                 # When note window closes, also close the hidden root to exit cleanly
