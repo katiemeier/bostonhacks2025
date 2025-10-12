@@ -9,6 +9,7 @@ SELECT_BG = "#ffd6ea"
 import tkinter as tk
 from tkinter import messagebox, filedialog
 from tkinter import font as tkfont
+from tkinter import ttk
 try:
     from PIL import Image, ImageTk  # type: ignore
     _PIL_AVAILABLE = True
@@ -88,9 +89,20 @@ class NoteApp:
         self._lines = [""]
         self.cur_row = 0
         self.cur_col = 0
-    # Selection state: (row, col) pairs or None
-    self.sel_anchor = None  # type: tuple[int, int] | None
-    self.sel_active = None  # type: tuple[int, int] | None
+        # Selection state: (row, col) pairs or None
+        self.sel_anchor = None  # type: tuple[int, int] | None
+        self.sel_active = None  # type: tuple[int, int] | None
+
+        # Scrolling state (vertical)
+        self.scroll_y = 0  # vertical offset in pixels
+        self._init_scrollbar_style()
+        self.vscroll = ttk.Scrollbar(self.bg_canvas, orient="vertical", command=self._on_scrollbar, style="Pink.Vertical.TScrollbar")
+        self.vscroll_window_id = None
+
+        # TOC scrolling state (vertical)
+        self.toc_scroll_y = 0  # vertical offset in pixels for the sidebar TOC
+        self.toc_scroll = ttk.Scrollbar(self.bg_canvas, orient="vertical", command=self._on_toc_scrollbar, style="Pink.Vertical.TScrollbar")
+        self.toc_scroll_window_id = None
 
         # Populate TOC items (filenames)
         self._toc_items = []
@@ -102,12 +114,14 @@ class NoteApp:
         self._action_id_to_handler = {}
 
         # Bindings on the background canvas (single surface)
-    self.bg_canvas.bind("<Button-1>", self._on_click)
-    self.bg_canvas.bind("<B1-Motion>", self._on_drag_select)
-    self.bg_canvas.bind("<ButtonRelease-1>", self._on_mouse_up)
+        self.bg_canvas.bind("<Button-1>", self._on_click)
+        self.bg_canvas.bind("<B1-Motion>", self._on_drag_select)
+        self.bg_canvas.bind("<ButtonRelease-1>", self._on_mouse_up)
         self.bg_canvas.bind("<Motion>", self._on_mouse_move)
         self.bg_canvas.bind("<Leave>", self._on_mouse_leave)
         self.bg_canvas.bind("<Key>", self._on_key)
+        # Mouse wheel scroll (Windows)
+        self.bg_canvas.bind("<MouseWheel>", self._on_mouse_wheel)
         self.bg_canvas.focus_set()
         self.root.after(10, lambda: (self._layout_on_canvas(), self._redraw_all()))
 
@@ -171,6 +185,41 @@ class NoteApp:
     def _dy(self, y: float) -> float:
         return self._offy + y * self._s
 
+    def _init_scrollbar_style(self):
+        # Configure a pink-themed vertical scrollbar using ttk
+        try:
+            style = ttk.Style()
+            # Pick a theme with element support; 'clam' is reliable for styling
+            try:
+                style.theme_use('clam')
+            except Exception:
+                pass
+            # Base colors
+            pink = BG_PINK
+            purple = FG_PURPLE
+            trough = '#ffe9f7'
+            hover = '#f5a6e8'
+            pressed = '#e984d6'
+            # Configure colors for the scrollbar elements
+            style.configure(
+                'Pink.Vertical.TScrollbar',
+                troughcolor=trough,
+                background=pink,
+                bordercolor=pink,
+                lightcolor=pink,
+                darkcolor=pink,
+                arrowcolor=purple
+            )
+            # Map dynamic states so hover/pressed slightly vary
+            style.map(
+                'Pink.Vertical.TScrollbar',
+                background=[('active', hover), ('pressed', pressed)],
+                arrowcolor=[('active', purple), ('pressed', purple)],
+            )
+        except Exception:
+            # If styling fails, silently continue with default look
+            pass
+
     def _apply_scaled_fonts(self):
         s = max(0.5, float(self._s))
         try:
@@ -186,7 +235,8 @@ class NoteApp:
             if not hasattr(self, 'title_font'):
                 self.title_font = tkfont.Font(family="Comic Sans MS", size=14, weight="bold")
             sz_action = max(8, int(round(14 * s)))
-            sz_toc = max(8, int(round(12 * s)))
+            # Make TOC font larger for readability
+            sz_toc = max(10, int(round(16 * s)))
             self.action_font.configure(size=sz_action, weight="bold")
             self.title_font.configure(size=sz_action, weight="bold")
             self.toc_font.configure(size=sz_toc)
@@ -196,6 +246,11 @@ class NoteApp:
             self.line_spacing = int(self.editor_font.metrics("linespace") + max(2, round(4 * s)))
         except Exception:
             self.line_spacing = max(16, int(round(26 * s)))
+        # Compute TOC line spacing to avoid overlap (fallback to scaled default)
+        try:
+            self.toc_line_spacing = int(self.toc_font.metrics("linespace") + max(4, round(6 * s)))
+        except Exception:
+            self.toc_line_spacing = max(20, int(round((self.d_toc_line_h if hasattr(self, 'd_toc_line_h') else 22) * self._s)))
 
     def _draw_background(self, w: int, h: int):
         # Clear previous bg
@@ -256,8 +311,8 @@ class NoteApp:
         self.bg_canvas.delete("__bg__")
         self.bg_canvas.delete("toc")
         self.bg_canvas.delete("actions")
-    self.bg_canvas.delete("notebook_line")
-    self.bg_canvas.delete("selection")
+        self.bg_canvas.delete("notebook_line")
+        self.bg_canvas.delete("selection")
         self.bg_canvas.delete("editor_text")
         self.bg_canvas.delete("cursor")
 
@@ -270,6 +325,13 @@ class NoteApp:
         self._apply_scaled_fonts()
         # Background image
         self._draw_background(w, h)
+        # Clamp scroll and update scrollbar
+        self._clamp_scroll()
+        self._update_scrollbar()
+
+        # Clamp TOC scroll and update its scrollbar
+        self._clamp_toc_scroll()
+        self._update_toc_scrollbar()
 
         # Sidebar title and items (text only, no backgrounds)
         self._draw_sidebar()
@@ -281,14 +343,36 @@ class NoteApp:
         self._redraw_editor()
 
     def _draw_sidebar(self):
-        # Items (scaled from design coordinates)
-        y = self._dy(self.d_toc_y)
-        line_h = self.d_toc_line_h * self._s
+        # Items (scaled from design coordinates) with TOC scrolling/clipping
+        top_y = self._dy(self.d_toc_y)
+        # Visible bottom limit aligned with editor's bottom margin for consistency
+        if self.design_h:
+            bottom_limit = min(self.bg_canvas.winfo_height(), int(round(self._dy(self.design_h - self.editor_bottom_margin))))
+        else:
+            bottom_limit = max(0, self.bg_canvas.winfo_height() - int(round(self.editor_bottom_margin * self._s)))
+        # Use dynamic TOC line spacing based on current font metrics
+        line_h = getattr(self, 'toc_line_spacing', self.d_toc_line_h * self._s)
         xpad = self._dx(self.d_toc_x)
+        # Start y based on scroll offset
+        y = top_y - self.toc_scroll_y
+        # Skip off-screen items above top boundary
+        start_idx = 0
+        if y < top_y and line_h > 0:
+            steps = int((top_y - y + line_h - 1) // line_h)
+            y += steps * line_h
+            start_idx = steps
         self._toc_id_to_name = {}
-        for idx, name in enumerate(self._toc_items):
+        for idx in range(start_idx, len(self._toc_items)):
+            if y >= bottom_limit:
+                break
+            name = self._toc_items[idx]
+            # Display without extension, but keep mapping to the real filename
+            try:
+                display_name = os.path.splitext(name)[0]
+            except Exception:
+                display_name = name
             item_id = self.bg_canvas.create_text(
-                xpad, y, text=name, font=self.toc_font, fill=FG_PURPLE, anchor="nw",
+                xpad, y, text=display_name, font=self.toc_font, fill=FG_PURPLE, anchor="nw",
                 tags=("toc", "toc_item", f"toc_index_{idx}")
             )
             self._toc_id_to_name[item_id] = name
@@ -414,11 +498,16 @@ class NoteApp:
         except Exception:
             baseline_offset = int(self.line_spacing * 0.75)
         content_x = self._dx(self.editor_left)
-        y = self._dy(self.editor_top) + baseline_offset
+        top_y = self._dy(self.editor_top)
+        y = top_y + baseline_offset - self.scroll_y
         if self.design_h:
             bottom_limit = min(h, int(round(self._dy(self.design_h - self.editor_bottom_margin))))
         else:
             bottom_limit = max(0, h - int(round(self.editor_bottom_margin * self._s)))
+        # Ensure we don't draw lines above the top boundary: advance to first visible line
+        if y < top_y:
+            steps = int((top_y - y + self.line_spacing - 1) // self.line_spacing)
+            y += steps * self.line_spacing
         while y < bottom_limit:
             right = min(self._dx(self.editor_right), w)
             self.bg_canvas.create_line(
@@ -437,12 +526,19 @@ class NoteApp:
         self._draw_selection()
         # Draw text lines on bg_canvas with content offset
         content_x = self._dx(self.editor_left)
-        line_y = self._dy(self.editor_top)
+        top_y = self._dy(self.editor_top)
+        line_y = top_y - self.scroll_y
         if self.design_h:
             bottom_limit = min(self.bg_canvas.winfo_height(), int(round(self._dy(self.design_h - self.editor_bottom_margin))))
         else:
             bottom_limit = max(0, self.bg_canvas.winfo_height() - int(round(self.editor_bottom_margin * self._s)))
-        for i, line in enumerate(self._lines):
+        # Skip rows above the top boundary so text doesn't render outside the box
+        start_idx = 0
+        if line_y < top_y:
+            start_idx = int((top_y - line_y + self.line_spacing - 1) // self.line_spacing)
+            line_y += start_idx * self.line_spacing
+        for i in range(start_idx, len(self._lines)):
+            line = self._lines[i]
             if line_y >= bottom_limit:
                 break
             self.bg_canvas.create_text(
@@ -487,13 +583,20 @@ class NoteApp:
             return
         (sr, sc), (er, ec) = norm
         content_x = self._dx(self.editor_left)
-        top_y = self._dy(self.editor_top)
+        top_y = self._dy(self.editor_top) - self.scroll_y
         if self.design_h:
             bottom_limit = min(self.bg_canvas.winfo_height(), int(round(self._dy(self.design_h - self.editor_bottom_margin))))
         else:
             bottom_limit = max(0, self.bg_canvas.winfo_height() - int(round(self.editor_bottom_margin * self._s)))
+        # Clamp selection drawing to start at top boundary
         line_y = top_y
-        for i, line in enumerate(self._lines):
+        start_idx = 0
+        if self.scroll_y > 0:
+            # same computation as text: derive first visible row
+            start_idx = int(self.scroll_y // self.line_spacing)
+            line_y = top_y + (self.scroll_y - start_idx * self.line_spacing)
+        for i in range(start_idx, len(self._lines)):
+            line = self._lines[i]
             if line_y >= bottom_limit:
                 break
             if sr <= i <= er:
@@ -527,7 +630,7 @@ class NoteApp:
         elif y >= bottom_limit:
             row = len(self._lines) - 1
         else:
-            row = max(0, min(int((y - top_y) // self.line_spacing), len(self._lines) - 1))
+            row = max(0, min(int((y - top_y + self.scroll_y) // self.line_spacing), len(self._lines) - 1))
         line = self._lines[row]
         col = 0
         x_rel = max(0, x - content_x)
@@ -538,6 +641,213 @@ class NoteApp:
                 break
             col = i
         return row, col
+
+    # ====== Scrolling support ======
+    def _editor_view_heights(self):
+        top_y = self._dy(self.editor_top)
+        if self.design_h:
+            bottom_limit = min(self.bg_canvas.winfo_height(), int(round(self._dy(self.design_h - self.editor_bottom_margin))))
+        else:
+            bottom_limit = max(0, self.bg_canvas.winfo_height() - int(round(self.editor_bottom_margin * self._s)))
+        return top_y, bottom_limit
+
+    def _content_pixel_height(self):
+        return max(0, len(self._lines) * self.line_spacing)
+
+    def _max_scroll(self):
+        top_y, bottom_limit = self._editor_view_heights()
+        view_h = max(0, int(bottom_limit - top_y))
+        content_h = self._content_pixel_height()
+        return max(0, content_h - view_h)
+
+    def _clamp_scroll(self):
+        max_sc = self._max_scroll()
+        if self.scroll_y < 0:
+            self.scroll_y = 0
+        elif self.scroll_y > max_sc:
+            self.scroll_y = max_sc
+
+    def _ensure_cursor_visible(self):
+        # Adjust scroll so current row is visible
+        top_y, bottom_limit = self._editor_view_heights()
+        view_h = max(1, int(bottom_limit - top_y))
+        cur_y = self.cur_row * self.line_spacing
+        if cur_y < self.scroll_y:
+            self.scroll_y = cur_y
+        elif cur_y + self.line_spacing > self.scroll_y + view_h:
+            self.scroll_y = cur_y + self.line_spacing - view_h
+        self._clamp_scroll()
+
+    def _on_mouse_wheel(self, event):
+        # On Windows, event.delta is multiples of 120
+        # Route wheel to TOC when cursor is over the sidebar TOC region; else scroll editor
+        try:
+            toc_top, toc_bottom = self._toc_view_heights()
+            in_toc_x = event.x <= self._dx(self.sidebar_width)
+            in_toc_y = toc_top <= event.y < toc_bottom
+        except Exception:
+            in_toc_x = False
+            in_toc_y = False
+        if in_toc_x and in_toc_y:
+            step_toc = max(1, int(getattr(self, 'toc_line_spacing', 20) // 2))
+            self.toc_scroll_y += -int(event.delta / 120) * step_toc
+            self._clamp_toc_scroll()
+            self._update_toc_scrollbar()
+            # Redraw only sidebar and actions (actions unaffected, but safe); simplest: redraw all
+            self._redraw_all()
+        else:
+            step = max(1, int(self.line_spacing // 2))
+            self.scroll_y += -int(event.delta / 120) * step
+            self._clamp_scroll()
+            self._update_scrollbar()
+            self._redraw_editor()
+
+    def _on_scrollbar(self, *args):
+        if not args:
+            return
+        cmd = args[0]
+        if cmd == 'moveto' and len(args) > 1:
+            try:
+                frac = float(args[1])
+            except Exception:
+                frac = 0.0
+            self.scroll_y = int(round(frac * self._max_scroll()))
+        elif cmd == 'scroll' and len(args) > 2:
+            try:
+                amt = int(args[1])
+            except Exception:
+                amt = 0
+            what = args[2]
+            if what == 'units':
+                self.scroll_y += amt * max(1, int(self.line_spacing // 2))
+            elif what == 'pages':
+                top_y, bottom_limit = self._editor_view_heights()
+                view_h = max(1, int(bottom_limit - top_y))
+                self.scroll_y += amt * view_h
+        self._clamp_scroll()
+        self._update_scrollbar()
+        self._redraw_editor()
+
+    def _update_scrollbar(self):
+        # Position the scrollbar to the right of the editor area and update thumb
+        top_y, bottom_limit = self._editor_view_heights()
+        # Scale the horizontal inset so it resizes with the UI
+        x = self._dx(self.editor_right) + int(round(6 * self._s))
+        h = max(10, int(bottom_limit - top_y))
+        # Scale the scrollbar width so it resizes with the UI
+        try:
+            sb_width = max(8, int(round(12 * self._s)))
+            self.vscroll.configure(width=sb_width)
+        except Exception:
+            pass
+        if self.vscroll_window_id is None:
+            self.vscroll_window_id = self.bg_canvas.create_window(
+                x, top_y, anchor='nw', window=self.vscroll, height=h
+            )
+        else:
+            self.bg_canvas.coords(self.vscroll_window_id, x, top_y)
+            try:
+                self.bg_canvas.itemconfigure(self.vscroll_window_id, height=h)
+            except Exception:
+                pass
+        content_h = self._content_pixel_height()
+        view_h = max(1, int(bottom_limit - top_y))
+        if content_h <= 0:
+            first, last = 0.0, 1.0
+        else:
+            first = self.scroll_y / content_h
+            last = min(1.0, (self.scroll_y + view_h) / content_h)
+        try:
+            self.vscroll.set(first, last)
+        except Exception:
+            pass
+
+    # ====== TOC Scrolling support ======
+    def _toc_view_heights(self):
+        top_y = self._dy(self.d_toc_y)
+        if self.design_h:
+            bottom_limit = min(self.bg_canvas.winfo_height(), int(round(self._dy(self.design_h - self.editor_bottom_margin))))
+        else:
+            bottom_limit = max(0, self.bg_canvas.winfo_height() - int(round(self.editor_bottom_margin * self._s)))
+        return top_y, bottom_limit
+
+    def _toc_content_pixel_height(self):
+        line_h = getattr(self, 'toc_line_spacing', max(20, int(round(self.d_toc_line_h * self._s))))
+        return max(0, len(self._toc_items) * line_h)
+
+    def _toc_max_scroll(self):
+        top_y, bottom_limit = self._toc_view_heights()
+        view_h = max(0, int(bottom_limit - top_y))
+        content_h = self._toc_content_pixel_height()
+        return max(0, content_h - view_h)
+
+    def _clamp_toc_scroll(self):
+        max_sc = self._toc_max_scroll()
+        if self.toc_scroll_y < 0:
+            self.toc_scroll_y = 0
+        elif self.toc_scroll_y > max_sc:
+            self.toc_scroll_y = max_sc
+
+    def _on_toc_scrollbar(self, *args):
+        if not args:
+            return
+        cmd = args[0]
+        if cmd == 'moveto' and len(args) > 1:
+            try:
+                frac = float(args[1])
+            except Exception:
+                frac = 0.0
+            self.toc_scroll_y = int(round(frac * self._toc_max_scroll()))
+        elif cmd == 'scroll' and len(args) > 2:
+            try:
+                amt = int(args[1])
+            except Exception:
+                amt = 0
+            what = args[2]
+            if what == 'units':
+                step = max(1, int(getattr(self, 'toc_line_spacing', 20) // 2))
+                self.toc_scroll_y += amt * step
+            elif what == 'pages':
+                top_y, bottom_limit = self._toc_view_heights()
+                view_h = max(1, int(bottom_limit - top_y))
+                self.toc_scroll_y += amt * view_h
+        self._clamp_toc_scroll()
+        self._update_toc_scrollbar()
+        self._redraw_all()
+
+    def _update_toc_scrollbar(self):
+        # Position the TOC scrollbar at the right edge of the sidebar and update thumb
+        top_y, bottom_limit = self._toc_view_heights()
+        # Pin the scrollbar's right edge to design-space x=376 (scaled to canvas)
+        x = self._dx(376)
+        h = max(10, int(bottom_limit - top_y))
+        # Scale the scrollbar width so it resizes with the UI
+        try:
+            sb_width = max(8, int(round(12 * self._s)))
+            self.toc_scroll.configure(width=sb_width)
+        except Exception:
+            pass
+        if self.toc_scroll_window_id is None:
+            self.toc_scroll_window_id = self.bg_canvas.create_window(
+                x, top_y, anchor='ne', window=self.toc_scroll, height=h
+            )
+        else:
+            self.bg_canvas.coords(self.toc_scroll_window_id, x, top_y)
+            try:
+                self.bg_canvas.itemconfigure(self.toc_scroll_window_id, height=h)
+            except Exception:
+                pass
+        content_h = self._toc_content_pixel_height()
+        view_h = max(1, int(bottom_limit - top_y))
+        if content_h <= 0:
+            first, last = 0.0, 1.0
+        else:
+            first = self.toc_scroll_y / content_h
+            last = min(1.0, (self.toc_scroll_y + view_h) / content_h)
+        try:
+            self.toc_scroll.set(first, last)
+        except Exception:
+            pass
 
     def _on_drag_select(self, event):
         # Update active selection during mouse drag
@@ -629,7 +939,11 @@ class NoteApp:
         # Compute cursor pixel position
         content_x = self._dx(self.editor_left)
         x = content_x
-        y = self._dy(self.editor_top) + self.cur_row * self.line_spacing
+        top_y = self._dy(self.editor_top)
+        y = top_y - self.scroll_y + self.cur_row * self.line_spacing
+        # If cursor would be above the top, clamp to top so it doesn't draw outside
+        if y < top_y:
+            y = top_y
         if 0 <= self.cur_row < len(self._lines):
             prefix = self._lines[self.cur_row][: self.cur_col]
             x += self.editor_font.measure(prefix)
@@ -750,6 +1064,16 @@ class NoteApp:
             if self.cur_row < len(self._lines) - 1:
                 self.cur_row += 1
                 self.cur_col = min(self.cur_col, len(self._lines[self.cur_row]))
+        elif ks in ("Prior", "Page_Up"):
+            # Page up: move up by visible rows
+            top_y, bottom_limit = self._editor_view_heights()
+            rows = max(1, int((bottom_limit - top_y) // self.line_spacing))
+            self.cur_row = max(0, self.cur_row - rows)
+        elif ks in ("Next", "Page_Down"):
+            # Page down: move down by visible rows
+            top_y, bottom_limit = self._editor_view_heights()
+            rows = max(1, int((bottom_limit - top_y) // self.line_spacing))
+            self.cur_row = min(len(self._lines) - 1, self.cur_row + rows)
         elif ks in ("BackSpace",):
             if self._has_selection():
                 self._delete_selection()
@@ -796,6 +1120,9 @@ class NoteApp:
             self._wrap_line_at(self.cur_row)
         else:
             return "break"
+        # Keep caret in view and update scrollbar
+        self._ensure_cursor_visible()
+        self._update_scrollbar()
         self._redraw_editor()
 
     def _delete_selection(self):
@@ -819,6 +1146,12 @@ class NoteApp:
     def _populate_toc(self):
         notes = [f for f in os.listdir(NOTES_DIR) if f.endswith('.md')]
         self._toc_items = sorted(notes)
+        # Reset/clamp TOC scroll to reflect new content
+        self._clamp_toc_scroll()
+        try:
+            self._update_toc_scrollbar()
+        except Exception:
+            pass
         # Redraw to reflect new list
         try:
             self._redraw_all()
@@ -921,7 +1254,9 @@ class NoteApp:
         self._lines = wrapped
         self.cur_row = 0
         self.cur_col = 0
+        self.scroll_y = 0
         self._clear_selection()
+        self._update_scrollbar()
         self._redraw_editor()
 
     def _get_text(self) -> str:
