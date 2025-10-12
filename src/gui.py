@@ -915,6 +915,53 @@ class App:
         """Start the application's main loop."""
         self.master.mainloop()
 
+    # --- Fullscreen helpers ---
+    def is_fullscreen_like(self) -> bool:
+        """Best-effort check if the window is effectively fullscreen.
+
+        Tries multiple platform-specific hints:
+        - attributes("-fullscreen") for Tk-managed fullscreen
+        - state() == "zoomed" (mostly Windows)
+        - window size approximately equals screen size
+        """
+        try:
+            # Direct Tk fullscreen attribute
+            fs = bool(self.master.attributes("-fullscreen"))
+            if fs:
+                return True
+        except Exception:
+            pass
+        # Some platforms expose a "-zoomed" attribute
+        try:
+            z = self.master.attributes("-zoomed")
+            if isinstance(z, bool) and z:
+                return True
+        except Exception:
+            pass
+        # Tk state hint (commonly 'zoomed' on Windows)
+        try:
+            if getattr(self.master, "state", None) and self.master.state() == "zoomed":
+                return True
+        except Exception:
+            pass
+        # Fallback: compare current client size to screen size
+        try:
+            self.master.update_idletasks()
+        except Exception:
+            pass
+        try:
+            w = max(0, int(self.master.winfo_width()))
+            h = max(0, int(self.master.winfo_height()))
+            sw = max(1, int(self.master.winfo_screenwidth()))
+            sh = max(1, int(self.master.winfo_screenheight()))
+            # Allow a small tolerance for borders/docks/notches
+            tol = 8
+            if abs(w - sw) <= tol and abs(h - sh) <= tol:
+                return True
+        except Exception:
+            pass
+        return False
+
 
 if __name__ == "__main__":
     App().run()

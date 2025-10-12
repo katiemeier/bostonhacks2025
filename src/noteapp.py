@@ -39,7 +39,7 @@ class NoteApp:
             messagebox.showwarning("No File", "No note is currently open.")
     def __init__(self, root):
         self.root = root
-        self.root.title("Simple Note App")
+        self.root.title("My Diary")
         self.root.geometry("816x503")
         self.root.configure(bg=BG_PINK)
         # spacing between notebook lines (pixels)
@@ -131,6 +131,14 @@ class NoteApp:
         self.bg_canvas.bind("<MouseWheel>", self._on_mouse_wheel)
         self.bg_canvas.focus_set()
         self.root.after(10, lambda: (self._layout_on_canvas(), self._redraw_all()))
+
+        # If the window was created with -fullscreen, keep it; otherwise, noop.
+        try:
+            if bool(self.root.attributes("-fullscreen")):
+                # On some platforms, applying fullscreen twice ensures proper layout
+                self.root.after(50, lambda: self.root.attributes("-fullscreen", True))
+        except Exception:
+            pass
 
         # Initialize current file state
         self.current_file = None
@@ -401,29 +409,22 @@ class NoteApp:
         y = self._dy(12)
         spacing = 100 * self._s
         for label, handler in labels:
-            # Create the text first to measure its bbox
+            # Create underlined action text with no background
+            try:
+                # Temporarily apply underline to action font
+                self.action_font.configure(underline=1)
+            except Exception:
+                pass
             item_id = self.bg_canvas.create_text(
                 x, y, text=label, font=self.action_font, fill=FG_PURPLE, anchor="nw",
                 tags=("actions", "action_item", f"action_{label}")
             )
+            # Reset underline after creating this item (font is shared)
+            try:
+                self.action_font.configure(underline=0)
+            except Exception:
+                pass
             bbox = self.bg_canvas.bbox(item_id)
-            # Draw a small pink rectangle behind the text (with padding), then lower it
-            if bbox is not None:
-                pad_x = max(4, int(round(8 * self._s)))
-                pad_y = max(2, int(round(4 * self._s)))
-                rx1 = bbox[0] - pad_x
-                ry1 = bbox[1] - pad_y
-                rx2 = bbox[2] + pad_x
-                ry2 = bbox[3] + pad_y
-                rect_id = self.bg_canvas.create_rectangle(
-                    rx1, ry1, rx2, ry2,
-                    fill=BG_PINK, outline="", tags=("actions", "action_bg", f"action_bg_{label}")
-                )
-                # Ensure rectangle sits behind the text label
-                try:
-                    self.bg_canvas.tag_lower(rect_id, item_id)
-                except Exception:
-                    pass
             # Track action hitboxes/handlers
             self.action_buttons.append({"label": label, "bbox": bbox, "handler": handler, "item_id": item_id})
             self._action_id_to_handler[item_id] = handler
@@ -1223,7 +1224,7 @@ class NoteApp:
                 self._set_text(content)
                 self.current_file = file_path
                 base = os.path.basename(file_path)
-                self.root.title(f"Simple Note App - {base}")
+                self.root.title(f"My Diary - {base}")
                 # Set title box from filename (without extension)
                 try:
                     name_wo_ext = os.path.splitext(base)[0]
@@ -1236,7 +1237,7 @@ class NoteApp:
         """Clears the text area for a new note and resets the name field."""
         self._set_text("")
         self.current_file = None
-        self.root.title("Simple Note App - New Note")
+        self.root.title("My Diary - New Note")
         self.title_var.set("")
 
     def open_note(self):
@@ -1253,7 +1254,7 @@ class NoteApp:
                 self._set_text(content)
                 self.current_file = file_path
                 base = os.path.basename(file_path)
-                self.root.title(f"Simple Note App - {base}")
+                self.root.title(f"My Diary - {base}")
                 # Set title box from filename (without extension)
                 try:
                     name_wo_ext = os.path.splitext(base)[0]
@@ -1286,7 +1287,7 @@ class NoteApp:
         with open(self.current_file, "w", encoding="utf-8") as file:
             file.write(self._get_text().strip())
 
-        self.root.title(f"Simple Note App - {filename}")
+        self.root.title(f"My Diary - {filename}")
         messagebox.showinfo("Saved", "Your note has been saved successfully.")
         # Refresh TOC after save
         self._populate_toc()
