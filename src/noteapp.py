@@ -39,7 +39,7 @@ class NoteApp:
             messagebox.showwarning("No File", "No note is currently open.")
     def __init__(self, root):
         self.root = root
-        self.root.title("Simple Note App")
+        self.root.title("My Diary")
         self.root.geometry("816x503")
         self.root.configure(bg=BG_PINK)
         # spacing between notebook lines (pixels)
@@ -1171,7 +1171,7 @@ class NoteApp:
                 self._set_text(content)
                 self.current_file = file_path
                 base = os.path.basename(file_path)
-                self.root.title(f"Simple Note App - {base}")
+                self.root.title(f"My Diary - {base}")
                 # Set title box from filename (without extension)
                 try:
                     name_wo_ext = os.path.splitext(base)[0]
@@ -1184,7 +1184,7 @@ class NoteApp:
         """Clears the text area for a new note and resets the name field."""
         self._set_text("")
         self.current_file = None
-        self.root.title("Simple Note App - New Note")
+        self.root.title("My Diary - New Note")
         self.title_var.set("")
 
     def open_note(self):
@@ -1201,7 +1201,7 @@ class NoteApp:
                 self._set_text(content)
                 self.current_file = file_path
                 base = os.path.basename(file_path)
-                self.root.title(f"Simple Note App - {base}")
+                self.root.title(f"My Diary - {base}")
                 # Set title box from filename (without extension)
                 try:
                     name_wo_ext = os.path.splitext(base)[0]
@@ -1234,7 +1234,7 @@ class NoteApp:
         with open(self.current_file, "w", encoding="utf-8") as file:
             file.write(self._get_text().strip())
 
-        self.root.title(f"Simple Note App - {filename}")
+        self.root.title(f"My Diary - {filename}")
         messagebox.showinfo("Saved", "Your note has been saved successfully.")
         # Refresh TOC after save
         self._populate_toc()
