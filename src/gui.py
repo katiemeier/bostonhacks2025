@@ -90,6 +90,12 @@ class App:
         self._base_size = (self.BASE_WIDTH, self.BASE_HEIGHT)
         self.canvas_main = tk.Canvas(self.master, width=w, height=h, highlightthickness=0, bd=0)
         self.canvas_main.place(x=0, y=0, width=w, height=h)
+        # Hide OS cursor and draw a custom big purple pointer on the canvas
+        try:
+            self.canvas_main.configure(cursor="none")
+        except Exception:
+            pass
+        self._custom_cursor_item = None
         # Load background and draw
         self._bg_item = None
         if _PIL_AVAILABLE:
@@ -120,6 +126,11 @@ class App:
         # Bind resize to stretch and reposition assets
         try:
             self.master.bind("<Configure>", self._on_configure)
+        except Exception:
+            pass
+        try:
+            self.canvas_main.bind("<Motion>", self._on_mouse_motion)
+            self.canvas_main.bind("<Leave>", self._on_mouse_leave)
         except Exception:
             pass
 
@@ -356,6 +367,53 @@ class App:
             self._item_green_off = self.canvas_main.create_image(nx * cw, ny * ch, image=self._img_green_off, anchor="center")
         except Exception:
             self._item_green_off = None
+
+    def _on_mouse_motion(self, event):
+        # Update the custom big purple pointer on the launcher canvas
+        try:
+            self._update_custom_pointer(event.x, event.y)
+        except Exception:
+            pass
+
+    def _on_mouse_leave(self, event):
+        # Hide the custom pointer when leaving
+        try:
+            if self._custom_cursor_item is not None:
+                self.canvas_main.itemconfigure(self._custom_cursor_item, state="hidden")
+        except Exception:
+            pass
+
+    def _update_custom_pointer(self, x: int, y: int):
+        # Draw a large purple arrow-like cursor that scales with window
+        try:
+            cw, ch = self._current_size
+            s = min(cw / self.BASE_WIDTH, ch / self.BASE_HEIGHT)
+        except Exception:
+            s = 1.0
+        size = max(12, int(round(18 * s)))
+        pts = [
+            x, y,
+            x - size, y + int(size*0.5),
+            x - int(size*0.4), y + int(size*0.6),
+            x - int(size*0.6), y + size,
+            x - int(size*0.2), y + int(size*0.85),
+            x - int(size*0.1), y + int(size*0.3),
+        ]
+        if self._custom_cursor_item is None:
+            try:
+                self._custom_cursor_item = self.canvas_main.create_polygon(
+                    *pts, fill=Colors.TEXT_SUBTITLE, outline="#ffffff", width=2, tags=("__custom_cursor__",)
+                )
+                self.canvas_main.tag_raise(self._custom_cursor_item)
+            except Exception:
+                self._custom_cursor_item = None
+        else:
+            try:
+                self.canvas_main.coords(self._custom_cursor_item, *pts)
+                self.canvas_main.itemconfigure(self._custom_cursor_item, state="normal")
+                self.canvas_main.tag_raise(self._custom_cursor_item)
+            except Exception:
+                pass
 
     def _ensure_green_on_image(self):
         """Ensure the green ON image is loaded for overlay."""

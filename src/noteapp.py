@@ -48,6 +48,11 @@ class NoteApp:
         # Background canvas with Frame5.png
         self.bg_canvas = tk.Canvas(self.root, highlightthickness=0, bd=0)
         self.bg_canvas.pack(fill="both", expand=True)
+        # Hide OS cursor over the canvas; we'll draw a big purple pointer that follows the mouse
+        try:
+            self.bg_canvas.configure(cursor="none")
+        except Exception:
+            pass
         self._bg_image_raw = None
         self._bg_image_tk = None
         # Uniform scaling state (design-space background size, scale and offsets)
@@ -112,6 +117,8 @@ class NoteApp:
         self._hover_item = None
         self._toc_id_to_name = {}
         self._action_id_to_handler = {}
+        # Custom canvas mouse pointer state
+        self._cursor_item = None
 
         # Bindings on the background canvas (single surface)
         self.bg_canvas.bind("<Button-1>", self._on_click)
@@ -993,19 +1000,28 @@ class NoteApp:
         return None
 
     def _on_mouse_move(self, event):
+        # Update custom purple pointer position
+        try:
+            self._update_canvas_cursor(event.x, event.y)
+        except Exception:
+            pass
         item = self._find_clickable_item_at(event.x, event.y)
         if item != getattr(self, "_hover_item", None):
             self._clear_hover()
             if item:
                 self._apply_hover(item)
                 self._hover_item = item
-                self.bg_canvas.configure(cursor="hand2")
             else:
-                self.bg_canvas.configure(cursor="")
+                pass
 
     def _on_mouse_leave(self, event):
         self._clear_hover()
-        self.bg_canvas.configure(cursor="")
+        # Hide custom pointer when leaving the canvas
+        try:
+            if self._cursor_item is not None:
+                self.bg_canvas.itemconfigure(self._cursor_item, state="hidden")
+        except Exception:
+            pass
 
     def _clear_hover(self):
         item = getattr(self, "_hover_item", None)
@@ -1024,6 +1040,43 @@ class NoteApp:
             self.bg_canvas.itemconfigure(item, fill=BTN_PURPLE)
         except Exception:
             pass
+
+    # ====== Custom big purple mouse pointer ======
+    def _update_canvas_cursor(self, x: int, y: int):
+        """Draw or move a large purple pointer that follows the mouse on the canvas."""
+        size = max(12, int(round(18 * getattr(self, "_s", 1.0))))
+        # Arrow-shaped polygon points relative to (x, y) tip
+        pts = [
+            x, y,                       # tip
+            x - size, y + int(size*0.5),
+            x - int(size*0.4), y + int(size*0.6),
+            x - int(size*0.6), y + size,
+            x - int(size*0.2), y + int(size*0.85),
+            x - int(size*0.1), y + int(size*0.3),
+        ]
+        if self._cursor_item is None:
+            try:
+                self._cursor_item = self.bg_canvas.create_polygon(
+                    *pts,
+                    fill=FG_PURPLE,
+                    outline="#ffffff",
+                    width=2,
+                    tags=("__custom_cursor__",)
+                )
+                # Ensure cursor is visually above text but won't be treated as clickable
+                try:
+                    self.bg_canvas.tag_raise(self._cursor_item)
+                except Exception:
+                    pass
+            except Exception:
+                self._cursor_item = None
+        else:
+            try:
+                self.bg_canvas.coords(self._cursor_item, *pts)
+                self.bg_canvas.itemconfigure(self._cursor_item, state="normal")
+                self.bg_canvas.tag_raise(self._cursor_item)
+            except Exception:
+                pass
 
     def _canvas_item_exists(self, item_id: int) -> bool:
         try:
