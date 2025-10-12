@@ -1,5 +1,5 @@
-BG_PINK = "#ffb6c1"
-FG_PURPLE = "#800080"
+BG_PINK = "#ee95e3"
+FG_PURPLE = "#7B157B"
 BTN_PURPLE = "#c084fc"
 ENTRY_BG = "#ffe4fa"
 BLACK = "#000000"
@@ -289,6 +289,7 @@ class NoteApp:
 
     def _draw_actions(self):
         # Render actions as clickable text; store hitboxes
+        # Header actions (exclude 'Change Password' which will be placed above the TOC)
         labels = [
             ("New", self.new_note),
             ("Open", self.open_note),
@@ -297,18 +298,66 @@ class NoteApp:
         ]
         self.action_buttons = []
         self._action_id_to_handler = {}
-        x = self._dx(self.sidebar_width + 12)
+        # Shift header action buttons slightly to the right (~10px in design space)
+        x = self._dx(self.sidebar_width + 52)
         y = self._dy(12)
-        spacing = 80 * self._s
+        spacing = 100 * self._s
         for label, handler in labels:
+            # Create the text first to measure its bbox
             item_id = self.bg_canvas.create_text(
                 x, y, text=label, font=self.action_font, fill=FG_PURPLE, anchor="nw",
                 tags=("actions", "action_item", f"action_{label}")
             )
             bbox = self.bg_canvas.bbox(item_id)
+            # Draw a small pink rectangle behind the text (with padding), then lower it
+            if bbox is not None:
+                pad_x = max(4, int(round(8 * self._s)))
+                pad_y = max(2, int(round(4 * self._s)))
+                rx1 = bbox[0] - pad_x
+                ry1 = bbox[1] - pad_y
+                rx2 = bbox[2] + pad_x
+                ry2 = bbox[3] + pad_y
+                rect_id = self.bg_canvas.create_rectangle(
+                    rx1, ry1, rx2, ry2,
+                    fill=BG_PINK, outline="", tags=("actions", "action_bg", f"action_bg_{label}")
+                )
+                # Ensure rectangle sits behind the text label
+                try:
+                    self.bg_canvas.tag_lower(rect_id, item_id)
+                except Exception:
+                    pass
+            # Track action hitboxes/handlers
             self.action_buttons.append({"label": label, "bbox": bbox, "handler": handler, "item_id": item_id})
             self._action_id_to_handler[item_id] = handler
             x += spacing
+
+        # Render the 'Change Password' action above the TOC in the sidebar
+        cp_x = self._dx(self.d_toc_x)
+        # Place it slightly above the first TOC item; lower a bit so it's below the New button height
+        cp_y = self._dy(self.d_toc_y - 88)
+        cp_item = self.bg_canvas.create_text(
+            cp_x, cp_y, text="Change Password", font=self.action_font, fill=FG_PURPLE, anchor="nw",
+            tags=("actions", "action_item", "action_Change Password")
+        )
+        cp_bbox = self.bg_canvas.bbox(cp_item)
+        if cp_bbox is not None:
+            pad_x = max(4, int(round(8 * self._s)))
+            pad_y = max(2, int(round(4 * self._s)))
+            rx1 = cp_bbox[0] - pad_x
+            ry1 = cp_bbox[1] - pad_y
+            rx2 = cp_bbox[2] + pad_x
+            ry2 = cp_bbox[3] + pad_y
+            cp_rect = self.bg_canvas.create_rectangle(
+                rx1, ry1, rx2, ry2,
+                fill=BG_PINK, outline="", tags=("actions", "action_bg", "action_bg_Change Password")
+            )
+            try:
+                self.bg_canvas.tag_lower(cp_rect, cp_item)
+            except Exception:
+                pass
+        # Track handler for the moved action
+        self.action_buttons.append({"label": "Change Password", "bbox": cp_bbox, "handler": self.change_password, "item_id": cp_item})
+        self._action_id_to_handler[cp_item] = self.change_password
 
         # Add a non-clickable Title label near the typing boundary (~454 px), moved up by 50px
         try:
@@ -399,6 +448,74 @@ class NoteApp:
             line_y += self.line_spacing
         # Draw caret
         self._draw_cursor()
+
+    def change_password(self):
+        """Show a pink "Listening..." popup and re-record the voice password without freezing UI."""
+        try:
+            import src.voice_unlock as voice_unlock
+        except Exception:
+            messagebox.showerror("Change Password", "Voice module not found. Please ensure dependencies are installed.")
+            return
+
+        # Create a centered, minimal pink popup indicating listening
+        popup = tk.Toplevel(self.root)
+        popup.transient(self.root)
+        popup.title("Change Password")
+        try:
+            popup.configure(bg=BG_PINK)
+        except Exception:
+            pass
+        msg = tk.Label(popup, text="Listening...", font=("Cosmic Sans MS", 20, "bold"), fg=FG_PURPLE, bg=BG_PINK)
+        msg.pack(padx=30, pady=30)
+        popup.update_idletasks()
+        try:
+            # Center over parent
+            px = self.root.winfo_rootx()
+            py = self.root.winfo_rooty()
+            pw = self.root.winfo_width()
+            ph = self.root.winfo_height()
+            w = popup.winfo_reqwidth()
+            h = popup.winfo_reqheight()
+            x = px + (pw - w) // 2
+            y = py + (ph - h) // 2
+            popup.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            pass
+        try:
+            popup.grab_set()
+        except Exception:
+            pass
+
+        def worker():
+            success = False
+            err = None
+            try:
+                success = bool(voice_unlock.enroll())
+            except Exception as e:
+                err = str(e)
+
+            def finish():
+                try:
+                    popup.destroy()
+                except Exception:
+                    pass
+                if success:
+                    messagebox.showinfo("Change Password", "Your new voice password has been recorded.")
+                else:
+                    msg = "Could not record a new voice password."
+                    if err:
+                        msg = f"{msg}\n{err}"
+                    messagebox.showerror("Change Password", msg)
+
+            # Return to UI thread
+            try:
+                self.root.after(0, finish)
+            except Exception:
+                finish()
+
+        # Run enrollment in the background to keep UI responsive
+        import threading
+        threading.Thread(target=worker, daemon=True).start()
 
     def _draw_cursor(self):
         # Compute cursor pixel position
