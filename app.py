@@ -39,6 +39,8 @@ class Launcher:
     def __init__(self):
         # Check for voice authorization, run initial setup if needed
         try:
+            # Track whether user was in fullscreen during initial setup
+            self._init_was_fullscreen = False
             if not voice_unlock._authorized_exists():
                 self._run_initial_setup_window()
         except Exception:
@@ -46,6 +48,16 @@ class Launcher:
 
         # Initialize main application with a callback for successful unlock
         self.app = App(on_unlocked=self._open_note_app)
+
+        # If initial setup was done in fullscreen, carry that over to the main GUI
+        try:
+            if getattr(self, "_init_was_fullscreen", False):
+                try:
+                    self.app.master.attributes("-fullscreen", True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # Show locked landing if voice is authorized
         try:
@@ -178,13 +190,49 @@ class Launcher:
                 return
             enrolling = True
 
+            def _compute_fullscreen_like() -> bool:
+                """Best-effort fullscreen detection for the init window."""
+                try:
+                    fs = bool(init_root.attributes("-fullscreen"))
+                    if fs:
+                        return True
+                except Exception:
+                    pass
+                try:
+                    init_root.update_idletasks()
+                except Exception:
+                    pass
+                try:
+                    w = max(0, int(init_root.winfo_width()))
+                    h = max(0, int(init_root.winfo_height()))
+                    sw = max(1, int(init_root.winfo_screenwidth()))
+                    sh = max(1, int(init_root.winfo_screenheight()))
+                    tol = 8
+                    return abs(w - sw) <= tol and abs(h - sh) <= tol
+                except Exception:
+                    return False
+
             def worker():
                 try:
                     canvas.itemconfigure(status_item, text="Recording enrollment (3s)... 🎤")
                     res = voice_unlock.enroll()
                     if res:
-                        canvas.itemconfigure(status_item, text="Enrollment successful. Opening app...")
-                        init_root.after(500, init_root.destroy)
+                        # Update status and capture fullscreen state on the UI thread
+                        def _on_success():
+                            try:
+                                canvas.itemconfigure(status_item, text="Enrollment successful. Opening app...")
+                            except Exception:
+                                pass
+                            try:
+                                # Store on the launcher so __init__ can apply it to the App
+                                self._init_was_fullscreen = _compute_fullscreen_like()
+                            except Exception:
+                                pass
+                            try:
+                                init_root.destroy()
+                            except Exception:
+                                pass
+                        init_root.after(500, _on_success)
                     else:
                         canvas.itemconfigure(status_item, text="Enrollment failed. Try again.")
                         init_root.after(1500, lambda: set_enrolling(False))
