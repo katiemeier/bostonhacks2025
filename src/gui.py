@@ -85,6 +85,11 @@ class App:
             self.canvas_main.configure(bg=Colors.BG_MAIN)
         # Manage clickability when using canvas items
         self._unlock_clickable = True
+        # Draw static off-state lights (red, green) near the listening indicator position
+        try:
+            self._draw_off_lights()
+        except Exception:
+            pass
 
 
     def _create_center_unlock_button(self):
@@ -174,6 +179,47 @@ class App:
         except Exception:
             pass
 
+    def _draw_off_lights(self):
+        """Draw the red and green OFF lights on the canvas at fixed positions.
+
+        Positions are set to form a horizontal trio with the yellow indicator at x=185.
+        Red OFF at x=152, Yellow ON/OFF at x=185, Green OFF at x=218, y=452.
+        """
+        if not hasattr(self, "canvas_main") or self.canvas_main is None:
+            return
+
+        # Avoid duplicates
+        if getattr(self, "_item_red_off", None) or getattr(self, "_item_green_off", None):
+            return
+
+        red_path = "assets/redlight_off.png"
+        green_path = "assets/greenlight_off.png"
+
+        # Load images with PIL if available to preserve alpha
+        try:
+            if _PIL_AVAILABLE:
+                red_img = Image.open(red_path).convert("RGBA")
+                green_img = Image.open(green_path).convert("RGBA")
+                self._img_red_off = ImageTk.PhotoImage(red_img)
+                self._img_green_off = ImageTk.PhotoImage(green_img)
+            else:
+                self._img_red_off = tk.PhotoImage(file=red_path)
+                self._img_green_off = tk.PhotoImage(file=green_path)
+        except Exception:
+            # If either image fails to load, silently skip drawing
+            self._img_red_off = None
+            self._img_green_off = None
+            return
+
+        try:
+            self._item_red_off = self.canvas_main.create_image(460, 360, image=self._img_red_off, anchor="center")
+        except Exception:
+            self._item_red_off = None
+        try:
+            self._item_green_off = self.canvas_main.create_image(460, 327, image=self._img_green_off, anchor="center")
+        except Exception:
+            self._item_green_off = None
+
     def _load_unlock_image_scaled(self, width: int, height: int):
         """Load the talk_button image scaled to exact width/height, preserving transparency.
 
@@ -200,22 +246,6 @@ class App:
             return approx
         except Exception:
             return base
-
-
-    # def _create_journal_area(self):
-    #     """Create the journal text area."""
-    #     self.journal = tk.Text(
-    #         self.master,
-    #         bg=Colors.BG_PAPER,
-    #         fg=Colors.TEXT_JOURNAL,
-    #         font=("Georgia", 12),
-    #         wrap="word"
-    #     )
-    #     self.journal.insert("1.0", "Dear Journal,\n\nThis is a secret place for your thoughts. Unlock with your voice to read more...")
-    #     self.journal.config(state="disabled")
-    #     self.journal.place(**self.NOTEBOOK_MARGINS)
-
-    
 
     def show_locked_landing(self):
         """Show only the background; no welcome back splash screen."""
