@@ -90,10 +90,6 @@ class NoteApp:
         self.cur_row = 0
         self.cur_col = 0
         # Selection state: (row, col) pairs or None
-<<<<<<< HEAD
-        self.sel_anchor = None  # type: ignore[assignment]
-        self.sel_active = None  # type: ignore[assignment]
-=======
         self.sel_anchor = None  # type: tuple[int, int] | None
         self.sel_active = None  # type: tuple[int, int] | None
 
@@ -107,7 +103,6 @@ class NoteApp:
         self.toc_scroll_y = 0  # vertical offset in pixels for the sidebar TOC
         self.toc_scroll = ttk.Scrollbar(self.bg_canvas, orient="vertical", command=self._on_toc_scrollbar, style="Pink.Vertical.TScrollbar")
         self.toc_scroll_window_id = None
->>>>>>> katiechanges
 
         # Populate TOC items (filenames)
         self._toc_items = []
