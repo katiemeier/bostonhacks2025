@@ -48,11 +48,6 @@ class NoteApp:
         # Background canvas with Frame5.png
         self.bg_canvas = tk.Canvas(self.root, highlightthickness=0, bd=0)
         self.bg_canvas.pack(fill="both", expand=True)
-        # Hide OS cursor over the canvas; we'll draw a big purple pointer that follows the mouse
-        try:
-            self.bg_canvas.configure(cursor="none")
-        except Exception:
-            pass
         self._bg_image_raw = None
         self._bg_image_tk = None
         # Uniform scaling state (design-space background size, scale and offsets)
@@ -117,9 +112,6 @@ class NoteApp:
         self._hover_item = None
         self._toc_id_to_name = {}
         self._action_id_to_handler = {}
-        # Custom canvas mouse pointer state
-        self._cursor_item = None
-        self._cursor_stem_item = None
 
         # Bindings on the background canvas (single surface)
         self.bg_canvas.bind("<Button-1>", self._on_click)
@@ -1002,30 +994,19 @@ class NoteApp:
         return None
 
     def _on_mouse_move(self, event):
-        # Update custom purple pointer position
-        try:
-            self._update_canvas_cursor(event.x, event.y)
-        except Exception:
-            pass
         item = self._find_clickable_item_at(event.x, event.y)
         if item != getattr(self, "_hover_item", None):
             self._clear_hover()
             if item:
                 self._apply_hover(item)
                 self._hover_item = item
+                self.bg_canvas.configure(cursor="hand2")
             else:
-                pass
+                self.bg_canvas.configure(cursor="")
 
     def _on_mouse_leave(self, event):
         self._clear_hover()
-        # Hide custom pointer when leaving the canvas
-        try:
-            if self._cursor_item is not None:
-                self.bg_canvas.itemconfigure(self._cursor_item, state="hidden")
-            if getattr(self, "_cursor_stem_item", None) is not None:
-                self.bg_canvas.itemconfigure(self._cursor_stem_item, state="hidden")
-        except Exception:
-            pass
+        self.bg_canvas.configure(cursor="")
 
     def _clear_hover(self):
         item = getattr(self, "_hover_item", None)
@@ -1042,70 +1023,6 @@ class NoteApp:
         # Apply a highlight color when hovering
         try:
             self.bg_canvas.itemconfigure(item, fill=BTN_PURPLE)
-        except Exception:
-            pass
-
-    # ====== Custom big purple mouse pointer ======
-    def _update_canvas_cursor(self, x: int, y: int):
-        """Draw or move a rotated triangle pointer (45° CCW) with a small stem at its bottom."""
-        import math
-        s = float(getattr(self, "_s", 1.0))
-        size = max(12, int(round(18 * s)))
-        ang = math.radians(45.0)
-        cos_a, sin_a = math.cos(ang), math.sin(ang)
-        # Define triangle in local coordinates (tip at 0,0), then rotate CCW 45°
-        p0 = (0.0, 0.0)
-        p1 = (-size, size * 0.6)
-        p2 = (0.0, size)
-        def rot(pt):
-            px, py = pt
-            return (px * cos_a - py * sin_a, px * sin_a + py * cos_a)
-        r0 = rot(p0)
-        r1 = rot(p1)
-        r2 = rot(p2)
-        pts = [
-            x + r0[0], y + r0[1],
-            x + r1[0], y + r1[1],
-            x + r2[0], y + r2[1],
-        ]
-        if self._cursor_item is None:
-            try:
-                self._cursor_item = self.bg_canvas.create_polygon(
-                    *pts,
-                    fill=FG_PURPLE,
-                    outline="#ffffff",
-                    width=2,
-                    tags=("__custom_cursor__",)
-                )
-                try:
-                    self.bg_canvas.itemconfigure(self._cursor_item, state="disabled")
-                except Exception:
-                    pass
-                # Place cursor at the very top of the z-order (on top of everything)
-                try:
-                    self.bg_canvas.tag_raise(self._cursor_item)
-                except Exception:
-                    pass
-            except Exception:
-                self._cursor_item = None
-        else:
-            try:
-                self.bg_canvas.coords(self._cursor_item, *pts)
-                try:
-                    self.bg_canvas.itemconfigure(self._cursor_item, state="disabled")
-                except Exception:
-                    pass
-                # Keep it at the very top
-                try:
-                    self.bg_canvas.tag_raise(self._cursor_item)
-                except Exception:
-                    pass
-            except Exception:
-                pass
-        # Hide any existing stem so only the triangle remains
-        try:
-            if getattr(self, "_cursor_stem_item", None) is not None:
-                self.bg_canvas.itemconfigure(self._cursor_stem_item, state="hidden")
         except Exception:
             pass
 
