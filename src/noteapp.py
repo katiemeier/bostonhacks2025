@@ -105,6 +105,14 @@ class NoteApp:
         self.bg_canvas.focus_set()
         self.root.after(10, lambda: (self._layout_on_canvas(), self._redraw_all()))
 
+        # If the window was created with -fullscreen, keep it; otherwise, noop.
+        try:
+            if bool(self.root.attributes("-fullscreen")):
+                # On some platforms, applying fullscreen twice ensures proper layout
+                self.root.after(50, lambda: self.root.attributes("-fullscreen", True))
+        except Exception:
+            pass
+
         # Initialize current file state
         self.current_file = None
 
