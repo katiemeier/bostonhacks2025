@@ -411,14 +411,28 @@ class App:
                 self._custom_cursor_item = self.canvas_main.create_polygon(
                     *pts, fill=Colors.TEXT_SUBTITLE, outline="#ffffff", width=2, tags=("__custom_cursor__",)
                 )
-                self.canvas_main.tag_raise(self._custom_cursor_item)
+                try:
+                    self.canvas_main.itemconfigure(self._custom_cursor_item, state="disabled")
+                except Exception:
+                    pass
+                # Place cursor at the absolute top of z-order
+                try:
+                    self.canvas_main.tag_raise(self._custom_cursor_item)
+                except Exception:
+                    pass
             except Exception:
                 self._custom_cursor_item = None
         else:
             try:
                 self.canvas_main.coords(self._custom_cursor_item, *pts)
-                self.canvas_main.itemconfigure(self._custom_cursor_item, state="normal")
-                self.canvas_main.tag_raise(self._custom_cursor_item)
+                try:
+                    self.canvas_main.itemconfigure(self._custom_cursor_item, state="disabled")
+                except Exception:
+                    pass
+                try:
+                    self.canvas_main.tag_raise(self._custom_cursor_item)
+                except Exception:
+                    pass
             except Exception:
                 pass
         # Hide any existing stem so only the triangle remains
