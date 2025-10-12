@@ -131,18 +131,41 @@ class App:
             try:
                 # Load base unlock image and scale to initial size
                 self._unlock_base_size = (98, 98)
+                # Track pressed state
+                self._unlock_pressed = False
                 if _PIL_AVAILABLE:
                     try:
                         self._unlock_base_pil = Image.open("assets/talk_button.png").convert("RGBA")
+                        # Also preload the pressed-state image
+                        try:
+                            self._unlock_pressed_base_pil = Image.open("assets/talk_button_depressed.png").convert("RGBA")
+                        except Exception:
+                            self._unlock_pressed_base_pil = None
                         uw, uh = self._unlock_base_size
                         scaled = self._unlock_base_pil.resize((uw, uh), Image.LANCZOS)
                         self.unlock_img = ImageTk.PhotoImage(scaled)
+                        # Create a matching pressed image if available
+                        if getattr(self, "_unlock_pressed_base_pil", None) is not None:
+                            pressed_scaled = self._unlock_pressed_base_pil.resize((uw, uh), Image.LANCZOS)
+                            self.unlock_img_pressed = ImageTk.PhotoImage(pressed_scaled)
+                        else:
+                            self.unlock_img_pressed = None
                     except Exception:
                         self._unlock_base_pil = None
                         self.unlock_img = self._load_unlock_image_scaled(98, 98)
+                        # Fallback scale for pressed image
+                        try:
+                            self.unlock_img_pressed = self._load_scaled_image("assets/talk_button_depressed.png", 98, 98)
+                        except Exception:
+                            self.unlock_img_pressed = None
                 else:
                     self._unlock_base_pil = None
                     self.unlock_img = self._load_unlock_image_scaled(98, 98)
+                    # Fallback scale for pressed image
+                    try:
+                        self.unlock_img_pressed = self._load_scaled_image("assets/talk_button_depressed.png", 98, 98)
+                    except Exception:
+                        self.unlock_img_pressed = None
                 try:
                     w, h = (int(x) for x in self.WINDOW_SIZE.split("x", 1))
                 except Exception:
@@ -152,9 +175,16 @@ class App:
                 )
                 # Bind mouse interactions
                 def _maybe_unlock(_evt=None):
+                    # Set pressed visual immediately; revert happens on release
+                    try:
+                        self._set_unlock_pressed(True)
+                    except Exception:
+                        pass
                     if getattr(self, "_unlock_clickable", True):
                         self.on_unlock()
                 self.canvas_main.tag_bind("unlock", "<Button-1>", _maybe_unlock)
+                # Swap image on release back to normal (press handled above)
+                self.canvas_main.tag_bind("unlock", "<ButtonRelease-1>", lambda e: self._set_unlock_pressed(False))
                 self.canvas_main.tag_bind("unlock", "<Enter>", lambda e: self.master.configure(cursor="hand2"))
                 self.canvas_main.tag_bind("unlock", "<Leave>", lambda e: self.master.configure(cursor=""))
                 return
@@ -163,6 +193,11 @@ class App:
         # Fallback: use a traditional Button with the image/text centered
         try:
             self.unlock_img = self._load_unlock_image_scaled(98, 98)
+            # Try to load pressed image as well
+            try:
+                self.unlock_img_pressed = self._load_scaled_image("assets/talk_button_depressed.png", 98, 98)
+            except Exception:
+                self.unlock_img_pressed = None
             self.unlock_btn = tk.Button(
                 self.master,
                 image=self.unlock_img,
@@ -174,6 +209,12 @@ class App:
                 borderwidth=0,
                 background=self.master.cget("bg")
             )
+            # Bind press/release to swap images if we have a pressed asset
+            try:
+                self.unlock_btn.bind("<ButtonPress-1>", lambda e: self._set_unlock_pressed(True))
+                self.unlock_btn.bind("<ButtonRelease-1>", lambda e: self._set_unlock_pressed(False))
+            except Exception:
+                pass
         except Exception:
             self.unlock_btn = tk.Button(
                 self.master,
@@ -499,6 +540,48 @@ class App:
         except Exception:
             return base
 
+    def _load_scaled_image(self, path: str, width: int, height: int):
+        """Generic helper to load and scale an image to a PhotoImage.
+
+        Attempts to use PIL for high-quality scaling; falls back to tk.PhotoImage with
+        subsample approximation when PIL isn't available.
+        """
+        if _PIL_AVAILABLE:
+            img = Image.open(path).convert("RGBA")
+            img = img.resize((width, height), Image.LANCZOS)
+            return ImageTk.PhotoImage(img)
+        base = tk.PhotoImage(file=path)
+        bw, bh = base.width(), base.height()
+        if bw <= 0 or bh <= 0:
+            return base
+        sx = max(1, round(bw / max(1, width)))
+        sy = max(1, round(bh / max(1, height)))
+        try:
+            return base.subsample(sx, sy)
+        except Exception:
+            return base
+
+    def _set_unlock_pressed(self, pressed: bool):
+        """Update the talk button image to pressed or normal state."""
+        self._unlock_pressed = bool(pressed)
+        try:
+            # Prefer canvas item if present
+            if getattr(self, "unlock_item", None) is not None and getattr(self, "canvas_main", None) is not None:
+                img = self.unlock_img_pressed if (self._unlock_pressed and getattr(self, "unlock_img_pressed", None)) else self.unlock_img
+                if img is not None:
+                    self.canvas_main.itemconfigure(self.unlock_item, image=img)
+                return
+            # Fallback Button widget
+            if getattr(self, "unlock_btn", None) is not None:
+                img = self.unlock_img_pressed if (self._unlock_pressed and getattr(self, "unlock_img_pressed", None)) else self.unlock_img
+                if img is not None:
+                    try:
+                        self.unlock_btn.config(image=img)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     def show_locked_landing(self):
         """Show only the background; no welcome back splash screen."""
         self.clear_overlay_frames()
@@ -547,9 +630,15 @@ class App:
                 if _PIL_AVAILABLE and getattr(self, "_unlock_base_pil", None) is not None:
                     uw, uh = self._unlock_base_size if hasattr(self, "_unlock_base_size") else (98, 98)
                     tw, th = max(24, int(uw * s)), max(24, int(uh * s))
+                    # Recreate both normal and pressed images at the new scale
                     scaled = self._unlock_base_pil.resize((tw, th), Image.LANCZOS)
                     self.unlock_img = ImageTk.PhotoImage(scaled)
-                    self.canvas_main.itemconfigure(self.unlock_item, image=self.unlock_img)
+                    if getattr(self, "_unlock_pressed_base_pil", None) is not None:
+                        pressed_scaled = self._unlock_pressed_base_pil.resize((tw, th), Image.LANCZOS)
+                        self.unlock_img_pressed = ImageTk.PhotoImage(pressed_scaled)
+                    # Choose which to display based on current state
+                    current_img = self.unlock_img_pressed if (getattr(self, "_unlock_pressed", False) and getattr(self, "unlock_img_pressed", None)) else self.unlock_img
+                    self.canvas_main.itemconfigure(self.unlock_item, image=current_img)
                 # Position to center
                 nx, ny = self.NORM_POS["unlock"]
                 self.canvas_main.coords(self.unlock_item, nx * cw, ny * ch)
