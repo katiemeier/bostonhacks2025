@@ -3,6 +3,7 @@ FG_PURPLE = "#7B157B"
 BTN_PURPLE = "#c084fc"
 ENTRY_BG = "#ffe4fa"
 BLACK = "#000000"
+SELECT_BG = "#ffd6ea"
 
 
 import tkinter as tk
@@ -87,6 +88,9 @@ class NoteApp:
         self._lines = [""]
         self.cur_row = 0
         self.cur_col = 0
+    # Selection state: (row, col) pairs or None
+    self.sel_anchor = None  # type: tuple[int, int] | None
+    self.sel_active = None  # type: tuple[int, int] | None
 
         # Populate TOC items (filenames)
         self._toc_items = []
@@ -98,7 +102,9 @@ class NoteApp:
         self._action_id_to_handler = {}
 
         # Bindings on the background canvas (single surface)
-        self.bg_canvas.bind("<Button-1>", self._on_click)
+    self.bg_canvas.bind("<Button-1>", self._on_click)
+    self.bg_canvas.bind("<B1-Motion>", self._on_drag_select)
+    self.bg_canvas.bind("<ButtonRelease-1>", self._on_mouse_up)
         self.bg_canvas.bind("<Motion>", self._on_mouse_move)
         self.bg_canvas.bind("<Leave>", self._on_mouse_leave)
         self.bg_canvas.bind("<Key>", self._on_key)
@@ -250,7 +256,8 @@ class NoteApp:
         self.bg_canvas.delete("__bg__")
         self.bg_canvas.delete("toc")
         self.bg_canvas.delete("actions")
-        self.bg_canvas.delete("notebook_line")
+    self.bg_canvas.delete("notebook_line")
+    self.bg_canvas.delete("selection")
         self.bg_canvas.delete("editor_text")
         self.bg_canvas.delete("cursor")
 
@@ -426,6 +433,8 @@ class NoteApp:
         self.bg_canvas.delete("cursor")
         # Draw lines first
         self._draw_notebook_lines()
+        # Draw selection highlight behind text (if any)
+        self._draw_selection()
         # Draw text lines on bg_canvas with content offset
         content_x = self._dx(self.editor_left)
         line_y = self._dy(self.editor_top)
@@ -448,6 +457,105 @@ class NoteApp:
             line_y += self.line_spacing
         # Draw caret
         self._draw_cursor()
+
+    # ====== Selection support ======
+    def _has_selection(self) -> bool:
+        return bool(self.sel_anchor and self.sel_active and self.sel_anchor != self.sel_active)
+
+    def _clear_selection(self):
+        self.sel_anchor = None
+        self.sel_active = None
+        try:
+            self.bg_canvas.delete("selection")
+        except Exception:
+            pass
+
+    def _normalized_selection(self):
+        if not self._has_selection():
+            return None
+        (ar, ac) = self.sel_anchor  # type: ignore
+        (br, bc) = self.sel_active  # type: ignore
+        if (br, bc) < (ar, ac):
+            return (br, bc), (ar, ac)
+        return (ar, ac), (br, bc)
+
+    def _draw_selection(self):
+        if not self._has_selection():
+            return
+        norm = self._normalized_selection()
+        if not norm:
+            return
+        (sr, sc), (er, ec) = norm
+        content_x = self._dx(self.editor_left)
+        top_y = self._dy(self.editor_top)
+        if self.design_h:
+            bottom_limit = min(self.bg_canvas.winfo_height(), int(round(self._dy(self.design_h - self.editor_bottom_margin))))
+        else:
+            bottom_limit = max(0, self.bg_canvas.winfo_height() - int(round(self.editor_bottom_margin * self._s)))
+        line_y = top_y
+        for i, line in enumerate(self._lines):
+            if line_y >= bottom_limit:
+                break
+            if sr <= i <= er:
+                start_col = sc if i == sr else 0
+                end_col = ec if i == er else len(line)
+                if start_col != end_col:
+                    x1 = content_x + self.editor_font.measure(line[: start_col])
+                    x2 = content_x + self.editor_font.measure(line[: end_col])
+                    y1 = line_y
+                    y2 = line_y + self.line_spacing
+                    try:
+                        self.bg_canvas.create_rectangle(
+                            x1, y1, x2, y2,
+                            fill=SELECT_BG, outline="",
+                            tags=("selection",)
+                        )
+                    except Exception:
+                        pass
+            line_y += self.line_spacing
+
+    def _point_to_row_col(self, x: int, y: int):
+        content_x = self._dx(self.editor_left)
+        top_y = self._dy(self.editor_top)
+        if self.design_h:
+            bottom_limit = min(self.bg_canvas.winfo_height(), int(round(self._dy(self.design_h - self.editor_bottom_margin))))
+        else:
+            bottom_limit = max(0, self.bg_canvas.winfo_height() - int(round(self.editor_bottom_margin * self._s)))
+        # Constrain y within editor region
+        if y < top_y:
+            row = 0
+        elif y >= bottom_limit:
+            row = len(self._lines) - 1
+        else:
+            row = max(0, min(int((y - top_y) // self.line_spacing), len(self._lines) - 1))
+        line = self._lines[row]
+        col = 0
+        x_rel = max(0, x - content_x)
+        for i in range(len(line) + 1):
+            w = self.editor_font.measure(line[:i])
+            if w >= x_rel:
+                col = i
+                break
+            col = i
+        return row, col
+
+    def _on_drag_select(self, event):
+        # Update active selection during mouse drag
+        row, col = self._point_to_row_col(event.x, event.y)
+        if self.sel_anchor is None:
+            self.sel_anchor = (row, col)
+        self.sel_active = (row, col)
+        self.cur_row, self.cur_col = row, col
+        self._redraw_editor()
+
+    def _on_mouse_up(self, event):
+        # Finalize selection on mouse release
+        if self.sel_anchor is None:
+            return
+        row, col = self._point_to_row_col(event.x, event.y)
+        self.sel_active = (row, col)
+        self.cur_row, self.cur_col = row, col
+        self._redraw_editor()
 
     def change_password(self):
         """Show a pink "Listening..." popup and re-record the voice password without freezing UI."""
@@ -554,26 +662,12 @@ class NoteApp:
                 if name:
                     self._open_note_by_name(name)
                     return
-        # Editor click: set cursor
-        content_x = self._dx(self.editor_left)
-        top_y = self._dy(self.editor_top)
-        if self.design_h:
-            bottom_limit = min(self.bg_canvas.winfo_height(), int(round(self._dy(self.design_h - self.editor_bottom_margin))))
-        else:
-            bottom_limit = max(0, self.bg_canvas.winfo_height() - int(round(self.editor_bottom_margin * self._s)))
-        if (y >= top_y) and (y < bottom_limit):
-            row = max(0, min(int((y - top_y) // self.line_spacing), len(self._lines) - 1))
-            line = self._lines[row]
-            col = 0
-            x_rel = max(0, x - content_x)
-            for i in range(len(line) + 1):
-                w = self.editor_font.measure(line[:i])
-                if w >= x_rel:
-                    col = i
-                    break
-                col = i
-            self.cur_row, self.cur_col = row, col
-            self._redraw_editor()
+        # Editor click: set caret and start selection anchor
+        row, col = self._point_to_row_col(x, y)
+        self.cur_row, self.cur_col = row, col
+        self.sel_anchor = (row, col)
+        self.sel_active = (row, col)
+        self._redraw_editor()
 
     def _find_clickable_item_at(self, x: int, y: int):
         # Return top-most clickable item id at x,y or None
@@ -627,28 +721,39 @@ class NoteApp:
         ks = event.keysym
         ch = event.char
         # Navigation
+        if ks in ("BackSpace", "Delete"):
+            if self._has_selection():
+                self._delete_selection()
+                self._redraw_editor()
+                return "break"
         if ks == "Left":
+            self._clear_selection()
             if self.cur_col > 0:
                 self.cur_col -= 1
             elif self.cur_row > 0:
                 self.cur_row -= 1
                 self.cur_col = len(self._lines[self.cur_row])
         elif ks == "Right":
+            self._clear_selection()
             if self.cur_col < len(self._lines[self.cur_row]):
                 self.cur_col += 1
             elif self.cur_row < len(self._lines) - 1:
                 self.cur_row += 1
                 self.cur_col = 0
         elif ks == "Up":
+            self._clear_selection()
             if self.cur_row > 0:
                 self.cur_row -= 1
                 self.cur_col = min(self.cur_col, len(self._lines[self.cur_row]))
         elif ks == "Down":
+            self._clear_selection()
             if self.cur_row < len(self._lines) - 1:
                 self.cur_row += 1
                 self.cur_col = min(self.cur_col, len(self._lines[self.cur_row]))
         elif ks in ("BackSpace",):
-            if self.cur_col > 0:
+            if self._has_selection():
+                self._delete_selection()
+            elif self.cur_col > 0:
                 line = self._lines[self.cur_row]
                 self._lines[self.cur_row] = line[: self.cur_col - 1] + line[self.cur_col :]
                 self.cur_col -= 1
@@ -659,7 +764,21 @@ class NoteApp:
                 del self._lines[self.cur_row]
                 self.cur_row -= 1
                 self.cur_col = prev_len
+            self._clear_selection()
+        elif ks in ("Delete",):
+            if self._has_selection():
+                self._delete_selection()
+            else:
+                line = self._lines[self.cur_row]
+                if self.cur_col < len(line):
+                    self._lines[self.cur_row] = line[: self.cur_col] + line[self.cur_col + 1:]
+                elif self.cur_row < len(self._lines) - 1:
+                    # merge with next line
+                    self._lines[self.cur_row] += self._lines[self.cur_row + 1]
+                    del self._lines[self.cur_row + 1]
         elif ks in ("Return", "KP_Enter"):
+            if self._has_selection():
+                self._delete_selection()
             line = self._lines[self.cur_row]
             left, right = line[: self.cur_col], line[self.cur_col :]
             self._lines[self.cur_row] = left
@@ -668,6 +787,8 @@ class NoteApp:
             self.cur_col = 0
         elif ch and ch >= " " and ch != "\x7f":
             # printable character
+            if self._has_selection():
+                self._delete_selection()
             line = self._lines[self.cur_row]
             self._lines[self.cur_row] = line[: self.cur_col] + ch + line[self.cur_col :]
             self.cur_col += 1
@@ -676,6 +797,23 @@ class NoteApp:
         else:
             return "break"
         self._redraw_editor()
+
+    def _delete_selection(self):
+        norm = self._normalized_selection()
+        if not norm:
+            return
+        (sr, sc), (er, ec) = norm
+        if sr == er:
+            line = self._lines[sr]
+            self._lines[sr] = line[:sc] + line[ec:]
+        else:
+            first = self._lines[sr][:sc]
+            last = self._lines[er][ec:]
+            self._lines[sr] = first + last
+            # delete lines between sr+1 and er inclusive
+            del self._lines[sr + 1 : er + 1]
+        self.cur_row, self.cur_col = sr, sc
+        self._clear_selection()
 
     
     def _populate_toc(self):
@@ -783,6 +921,7 @@ class NoteApp:
         self._lines = wrapped
         self.cur_row = 0
         self.cur_col = 0
+        self._clear_selection()
         self._redraw_editor()
 
     def _get_text(self) -> str:
