@@ -1,8 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
 import threading
-import random
-import time
 try:
     from PIL import Image, ImageTk  # type: ignore
     _PIL_AVAILABLE = True
@@ -46,6 +43,17 @@ class App:
     WINDOW_SIZE = "816x503"  # modified from "720x880"
     CANVAS_SIZE = (796, 280)  # modified from (700, 800)
     NOTEBOOK_PADDING = 40
+    # Base design size and normalized coordinates for key items
+    BASE_WIDTH = 816
+    BASE_HEIGHT = 503
+    NORM_POS = {
+        "unlock": (0.5, 0.5),
+        "indicator": (460/816, 172/503),
+        "red_off": (460/816, 360/503),
+        "green_off": (460/816, 327/503),
+    }
+    # Delay after acceptance before opening notebook (ms)
+    OPEN_NOTE_DELAY_MS = 800
     
     # Component positions and sizes as dicts for place() method
     NOTEBOOK_MARGINS = {"x": 20, "y": 20, "width": 756, "height": 240}  # modified from {"x": 110, "y": 300, "width": 500, "height": 340}
@@ -78,31 +86,63 @@ class App:
             w, h = (int(x) for x in self.WINDOW_SIZE.split("x", 1))
         except Exception:
             w, h = 816, 503
+        self._current_size = (w, h)
+        self._base_size = (self.BASE_WIDTH, self.BASE_HEIGHT)
         self.canvas_main = tk.Canvas(self.master, width=w, height=h, highlightthickness=0, bd=0)
         self.canvas_main.place(x=0, y=0, width=w, height=h)
-        try:
-            self.bg_image = tk.PhotoImage(file="assets/launch2.png")
-            self.canvas_main.create_image(0, 0, image=self.bg_image, anchor="nw")
-        except Exception:
-            # If image fails to load, use the themed background color
-            self.canvas_main.configure(bg=Colors.BG_MAIN)
+        # Load background and draw
+        self._bg_item = None
+        if _PIL_AVAILABLE:
+            try:
+                self._bg_base_pil = Image.open("assets/launch2.png").convert("RGBA")
+                # Scale to current window
+                bg_scaled = self._bg_base_pil.resize((w, h), Image.LANCZOS)
+                self.bg_image = ImageTk.PhotoImage(bg_scaled)
+                self._bg_item = self.canvas_main.create_image(0, 0, image=self.bg_image, anchor="nw")
+            except Exception:
+                self._bg_base_pil = None
+                self.canvas_main.configure(bg=Colors.BG_MAIN)
+        else:
+            try:
+                self.bg_image = tk.PhotoImage(file="assets/launch2.png")
+                self._bg_item = self.canvas_main.create_image(0, 0, image=self.bg_image, anchor="nw")
+            except Exception:
+                # If image fails to load, use the themed background color
+                self.canvas_main.configure(bg=Colors.BG_MAIN)
         # Manage clickability when using canvas items
         self._unlock_clickable = True
+        # Draw static off-state lights (red, green) near the listening indicator position
+        try:
+            self._draw_off_lights()
+        except Exception:
+            pass
 
-    def create_notebook(self):
-        """Create the notebook UI with decorative elements."""
-        self._create_canvas()
-        self._create_notebook_paper()
-        self._create_spiral_binding()
-        self._add_sparkles()
-        self._add_title()
+        # Bind resize to stretch and reposition assets
+        try:
+            self.master.bind("<Configure>", self._on_configure)
+        except Exception:
+            pass
+
 
     def _create_center_unlock_button(self):
         """Create a centered unlock image on the canvas with click handling for transparent PNGs."""
         # Preferred: draw on the main canvas so PNG transparency shows the background
         if hasattr(self, "canvas_main") and self.canvas_main:
             try:
-                self.unlock_img = self._load_unlock_image_scaled(98, 98)
+                # Load base unlock image and scale to initial size
+                self._unlock_base_size = (98, 98)
+                if _PIL_AVAILABLE:
+                    try:
+                        self._unlock_base_pil = Image.open("assets/talk_button.png").convert("RGBA")
+                        uw, uh = self._unlock_base_size
+                        scaled = self._unlock_base_pil.resize((uw, uh), Image.LANCZOS)
+                        self.unlock_img = ImageTk.PhotoImage(scaled)
+                    except Exception:
+                        self._unlock_base_pil = None
+                        self.unlock_img = self._load_unlock_image_scaled(98, 98)
+                else:
+                    self._unlock_base_pil = None
+                    self.unlock_img = self._load_unlock_image_scaled(98, 98)
                 try:
                     w, h = (int(x) for x in self.WINDOW_SIZE.split("x", 1))
                 except Exception:
@@ -147,6 +187,291 @@ class App:
             )
         self.unlock_btn.place(relx=0.5, rely=0.5, anchor="center")
 
+    def _show_listening_indicator(self):
+        """Show the yellow light indicator at fixed coordinates during listening."""
+        try:
+            if not hasattr(self, "canvas_main") or self.canvas_main is None:
+                return
+            # Avoid duplicating indicator
+            if getattr(self, "_indicator_item", None):
+                return
+            path = "assets/yellowlight_on.png"
+            # Prefer PhotoImage; use PIL when available for consistency
+            if _PIL_AVAILABLE:
+                try:
+                    self._base_yellow_on_pil = getattr(self, "_base_yellow_on_pil", None) or Image.open(path).convert("RGBA")
+                except Exception:
+                    self._base_yellow_on_pil = None
+                if self._base_yellow_on_pil is not None:
+                    # Scale to current factor
+                    cw, ch = self._current_size
+                    s = min(cw / self.BASE_WIDTH, ch / self.BASE_HEIGHT)
+                    w = max(1, int(self._base_yellow_on_pil.width * s))
+                    h = max(1, int(self._base_yellow_on_pil.height * s))
+                    self._indicator_image = ImageTk.PhotoImage(self._base_yellow_on_pil.resize((w, h), Image.LANCZOS))
+                else:
+                    self._indicator_image = None
+            else:
+                try:
+                    self._indicator_image = tk.PhotoImage(file=path)
+                except Exception:
+                    self._indicator_image = None
+            # Create image at exact requested coordinates
+            if self._indicator_image is not None:
+                nx, ny = self.NORM_POS["indicator"]
+                cw, ch = self._current_size
+                self._indicator_item = self.canvas_main.create_image(
+                    nx * cw, ny * ch, image=self._indicator_image, anchor="center"
+                )
+            else:
+                self._indicator_item = None
+        except Exception:
+            # Silently ignore if the asset is missing or fails to load
+            self._indicator_item = None
+
+    def _hide_listening_indicator(self):
+        """Remove the listening indicator if present."""
+        try:
+            if getattr(self, "_indicator_item", None) and getattr(self, "canvas_main", None):
+                try:
+                    self.canvas_main.delete(self._indicator_item)
+                except Exception:
+                    pass
+            self._indicator_item = None
+            # Keep a reference to the image var, but allow GC later
+            self._indicator_image = None
+        except Exception:
+            pass
+
+    def _draw_off_lights(self):
+        """Draw the red and green OFF lights on the canvas at fixed positions.
+
+        Positions are set to form a horizontal trio with the yellow indicator at x=185.
+        Red OFF at x=152, Yellow ON/OFF at x=185, Green OFF at x=218, y=452.
+        """
+        if not hasattr(self, "canvas_main") or self.canvas_main is None:
+            return
+
+        # Avoid duplicates
+        if getattr(self, "_item_red_off", None) or getattr(self, "_item_green_off", None):
+            return
+
+        red_path = "assets/redlight_off.png"
+        green_path = "assets/greenlight_off.png"
+        red_on_path = "assets/redlight_on.png"
+        green_on_path = "assets/greenlight_on.png"
+
+        # Load images with PIL if available to preserve alpha
+        try:
+            if _PIL_AVAILABLE:
+                red_img = Image.open(red_path).convert("RGBA")
+                green_img = Image.open(green_path).convert("RGBA")
+                # Store base PIL for scaling on resize
+                self._base_red_off_pil = red_img
+                self._base_green_off_pil = green_img
+                self._img_red_off = ImageTk.PhotoImage(red_img)
+                self._img_green_off = ImageTk.PhotoImage(green_img)
+                # Preload the ON images for overlays
+                try:
+                    red_on_img = Image.open(red_on_path).convert("RGBA")
+                    self._base_red_on_pil = red_on_img
+                    self._img_red_on = ImageTk.PhotoImage(red_on_img)
+                except Exception:
+                    self._img_red_on = None
+                    self._base_red_on_pil = None
+                try:
+                    green_on_img = Image.open(green_on_path).convert("RGBA")
+                    self._base_green_on_pil = green_on_img
+                    self._img_green_on = ImageTk.PhotoImage(green_on_img)
+                except Exception:
+                    self._img_green_on = None
+                    self._base_green_on_pil = None
+            else:
+                self._img_red_off = tk.PhotoImage(file=red_path)
+                self._img_green_off = tk.PhotoImage(file=green_path)
+                try:
+                    self._img_red_on = tk.PhotoImage(file=red_on_path)
+                except Exception:
+                    self._img_red_on = None
+                try:
+                    self._img_green_on = tk.PhotoImage(file=green_on_path)
+                except Exception:
+                    self._img_green_on = None
+        except Exception:
+            # If either image fails to load, silently skip drawing
+            self._img_red_off = None
+            self._img_green_off = None
+            return
+
+        try:
+            nx, ny = self.NORM_POS["red_off"]
+            cw, ch = self._current_size
+            self._item_red_off = self.canvas_main.create_image(nx * cw, ny * ch, image=self._img_red_off, anchor="center")
+        except Exception:
+            self._item_red_off = None
+        try:
+            nx, ny = self.NORM_POS["green_off"]
+            cw, ch = self._current_size
+            self._item_green_off = self.canvas_main.create_image(nx * cw, ny * ch, image=self._img_green_off, anchor="center")
+        except Exception:
+            self._item_green_off = None
+
+    def _ensure_green_on_image(self):
+        """Ensure the green ON image is loaded for overlay."""
+        if getattr(self, "_img_green_on", None) is not None:
+            return True
+        path = "assets/greenlight_on.png"
+        try:
+            if _PIL_AVAILABLE:
+                img = Image.open(path).convert("RGBA")
+                self._img_green_on = ImageTk.PhotoImage(img)
+            else:
+                self._img_green_on = tk.PhotoImage(file=path)
+            return True
+        except Exception:
+            self._img_green_on = None
+            return False
+
+    def _show_green_light_on(self):
+        """Show the green ON light over the green OFF position."""
+        canvas = getattr(self, "canvas_main", None)
+        base_item = getattr(self, "_item_green_off", None)
+        if not canvas or not base_item:
+            return
+        if not self._ensure_green_on_image():
+            return
+        try:
+            coords = canvas.coords(base_item)
+            if not coords:
+                return
+            x, y = coords[0], coords[1]
+        except Exception:
+            return
+        overlay = getattr(self, "_item_green_on_overlay", None)
+        try:
+            if overlay is None:
+                self._item_green_on_overlay = canvas.create_image(
+                    x, y, image=self._img_green_on, anchor="center", state="normal"
+                )
+                print("Created green ON overlay")
+            else:
+                canvas.coords(self._item_green_on_overlay, x, y)
+                canvas.itemconfigure(self._item_green_on_overlay, image=self._img_green_on, state="normal")
+        except Exception:
+            return
+
+    def _hide_green_light_on(self):
+        """Hide the green ON overlay if shown."""
+        canvas = getattr(self, "canvas_main", None)
+        overlay = getattr(self, "_item_green_on_overlay", None)
+        if not canvas or overlay is None:
+            return
+        try:
+            canvas.itemconfigure(overlay, state="hidden")
+        except Exception:
+            pass
+
+    def _ensure_red_on_image(self):
+        """Ensure the red ON image is loaded for blinking."""
+        if getattr(self, "_img_red_on", None) is not None:
+            return True
+        path = "assets/redlight_on.png"
+        try:
+            if _PIL_AVAILABLE:
+                img = Image.open(path).convert("RGBA")
+                self._img_red_on = ImageTk.PhotoImage(img)
+            else:
+                self._img_red_on = tk.PhotoImage(file=path)
+            return True
+        except Exception:
+            self._img_red_on = None
+            return False
+
+    def _blink_red_light(self, times: int = 2, on_ms: int = 180, off_ms: int = 140):
+        """Blink the red light ON image over the red OFF position.
+
+        - Non-blocking UI using after(); safe to call multiple times.
+        - If a blink is already in progress, it restarts the sequence.
+        """
+        # Validate canvas and base position
+        canvas = getattr(self, "canvas_main", None)
+        base_item = getattr(self, "_item_red_off", None)
+        if not canvas or not base_item:
+            return
+
+        # Ensure ON image is available
+        if not self._ensure_red_on_image():
+            return
+
+        # Determine coordinates of the OFF light to overlay exactly
+        try:
+            coords = canvas.coords(base_item)
+            if not coords:
+                return
+            x, y = coords[0], coords[1]
+        except Exception:
+            return
+
+        # Create (or move) an overlay item we can toggle hidden/normal
+        overlay = getattr(self, "_item_red_on_overlay", None)
+        try:
+            if overlay is None:
+                self._item_red_on_overlay = canvas.create_image(
+                    x, y, image=self._img_red_on, anchor="center", state="hidden"
+                )
+            else:
+                # Move overlay to correct position if needed and ensure correct image
+                try:
+                    canvas.coords(self._item_red_on_overlay, x, y)
+                    canvas.itemconfigure(self._item_red_on_overlay, image=self._img_red_on)
+                except Exception:
+                    pass
+        except Exception:
+            return
+
+        # Cancel any existing scheduled blink
+        after_id = getattr(self, "_red_blink_after_id", None)
+        if after_id is not None:
+            try:
+                self.master.after_cancel(after_id)
+            except Exception:
+                pass
+            self._red_blink_after_id = None
+
+        self._red_blinking = True
+
+        total_steps = max(1, int(times)) * 2  # on/off pairs
+
+        def step(i: int = 0):
+            if i >= total_steps:
+                # Ensure overlay is hidden at the end
+                try:
+                    canvas.itemconfigure(self._item_red_on_overlay, state="hidden")
+                except Exception:
+                    pass
+                self._red_blinking = False
+                self._red_blink_after_id = None
+                return
+            try:
+                if i % 2 == 0:
+                    # ON
+                    canvas.itemconfigure(self._item_red_on_overlay, state="normal")
+                    delay = on_ms
+                else:
+                    # OFF
+                    canvas.itemconfigure(self._item_red_on_overlay, state="hidden")
+                    delay = off_ms
+            except Exception:
+                # If something goes wrong, stop attempting
+                self._red_blinking = False
+                self._red_blink_after_id = None
+                return
+            # Schedule next toggle
+            self._red_blink_after_id = self.master.after(delay, lambda: step(i + 1))
+
+        # Start the sequence
+        step(0)
+
     def _load_unlock_image_scaled(self, width: int, height: int):
         """Load the talk_button image scaled to exact width/height, preserving transparency.
 
@@ -174,140 +499,119 @@ class App:
         except Exception:
             return base
 
-    def _create_canvas(self):
-        """Create the main canvas for the notebook."""
-        self.canvas = tk.Canvas(
-            self.master,
-            width=self.CANVAS_SIZE[0], 
-            height=self.CANVAS_SIZE[1],
-            bg=Colors.BG_CANVAS,
-            highlightthickness=0
-        )
-        self.canvas.place(x=10, y=10)
-
-    def _create_notebook_paper(self):
-        """Create the main paper area of the notebook."""
-        self.canvas.create_rectangle(
-            self.NOTEBOOK_PADDING, self.NOTEBOOK_PADDING,
-            660, 760,
-            fill=Colors.BG_PAPER,
-            outline=Colors.ACCENT_SPIRAL,
-            width=3
-        )
-
-    def _create_spiral_binding(self):
-        """Create decorative spiral binding on the notebook's left side."""
-        for i in range(9):
-            y = 80 + i * 70
-            self.canvas.create_oval(
-                30, y, 50, y + 30,
-                fill=Colors.ACCENT_SPIRAL,
-                outline=Colors.ACCENT_SPIRAL_OUTLINE
-            )
-
-    def _add_sparkles(self):
-        """Add decorative sparkles to the notebook."""
-        for _ in range(120):
-            x = random.randint(80, 620)
-            y = random.randint(60, 720)
-            r = random.randint(1, 4)
-            color = random.choice(Colors.ACCENT_SPARKLE)
-            self.canvas.create_oval(x, y, x + r, y + r, fill=color, outline=color)
-
-    def _add_title(self):
-        """Add the title and subtitle to the notebook."""
-        self.canvas.create_text(
-            self.TITLE_POSITION["x"], self.TITLE_POSITION["y"],
-            text="My Secret Journal",
-            fill=Colors.TEXT_TITLE,
-            font=("Helvetica", 28, "bold")
-        )
-        self.canvas.create_text(
-            self.SUBTITLE_POSITION["x"], self.SUBTITLE_POSITION["y"],
-            text="Unlock with your voice 💖",
-            fill=Colors.TEXT_SUBTITLE,
-            font=("Helvetica", 12)
-        )
-
-    def create_controls(self):
-        """Create interactive UI controls."""
-        self._create_status_area()
-        # self._create_journal_area()
-        self._create_buttons()
-
-    def _create_status_area(self):
-        """Create the status message area."""
-        self.status_var = tk.StringVar(value="")
-        self.status_label = tk.Label(
-            self.master,
-            textvariable=self.status_var,
-            bg=Colors.BG_PAPER,
-            fg=Colors.TEXT_STATUS,
-            font=("Helvetica", 11),
-            wraplength=520,
-            justify="center"
-        )
-        self.status_label.place(**self.STATUS_POSITION)
-
-    # def _create_journal_area(self):
-    #     """Create the journal text area."""
-    #     self.journal = tk.Text(
-    #         self.master,
-    #         bg=Colors.BG_PAPER,
-    #         fg=Colors.TEXT_JOURNAL,
-    #         font=("Georgia", 12),
-    #         wrap="word"
-    #     )
-    #     self.journal.insert("1.0", "Dear Journal,\n\nThis is a secret place for your thoughts. Unlock with your voice to read more...")
-    #     self.journal.config(state="disabled")
-    #     self.journal.place(**self.NOTEBOOK_MARGINS)
-
-    def _create_buttons(self):
-        """Create the unlock and exit buttons."""
-        self.unlock_btn = tk.Button(
-            self.master,
-            text="🔐 Unlock",
-            command=self.on_unlock,
-            bg=Colors.BTN_UNLOCK,
-            fg=Colors.TEXT_BTN,
-            activebackground=Colors.BTN_UNLOCK_ACTIVE,
-            font=("Helvetica", 12, "bold"),
-            bd=0
-        )
-        self.unlock_btn.place(**self.UNLOCK_BTN_POSITION)
-
-        self.exit_btn = tk.Button(
-            self.master,
-            text="Exit",
-            command=self.master.quit,
-            bg=Colors.BTN_EXIT,
-            fg=Colors.TEXT_EXIT,
-            activebackground=Colors.BTN_EXIT_ACTIVE,
-            font=("Helvetica", 11),
-            bd=0
-        )
-        self.exit_btn.place(**self.EXIT_BTN_POSITION)
-
-    def check_authorization(self):
-        """Check if a voice is authorized and show appropriate screen."""
-        try:
-            import src.voice_unlock as _vu
-            if not _vu._authorized_exists():
-                self.show_initial_window()
-            else:
-                self.show_locked_landing()
-        except ImportError:
-            # If voice_unlock not available, continue showing main window
-            pass
-
     def show_locked_landing(self):
         """Show only the background; no welcome back splash screen."""
         self.clear_overlay_frames()
         # Removed welcome back splash screen UI elements
 
-    def show_initial_window(self):
-        """Show an initial window to set up voice authentication."""
-        self.set_status("Initial setup: Please set your password.")
+    def _on_configure(self, event):
+        """Handle window resize/fullscreen: scale background and reposition assets proportionally."""
+        try:
+            new_w, new_h = int(event.width), int(event.height)
+        except Exception:
+            return
+        if new_w <= 1 or new_h <= 1:
+            return
+        # Avoid unnecessary work if size unchanged
+        cw, ch = getattr(self, "_current_size", (0, 0))
+        if (new_w, new_h) == (cw, ch):
+            return
+        # Resize canvas to fill window
+        try:
+            self.canvas_main.place(x=0, y=0, width=new_w, height=new_h)
+        except Exception:
+            pass
+        self._current_size = (new_w, new_h)
+        self._rescale_and_reposition()
+
+    def _rescale_and_reposition(self):
+        """Rescale images with PIL when available and reposition to normalized coordinates."""
+        cw, ch = self._current_size
+        bx, by = self.BASE_WIDTH, self.BASE_HEIGHT
+        s = min(cw / bx, ch / by)
+        # Background
+        try:
+            if _PIL_AVAILABLE and getattr(self, "_bg_base_pil", None) is not None and getattr(self, "_bg_item", None) is not None:
+                bg_scaled = self._bg_base_pil.resize((cw, ch), Image.LANCZOS)
+                self.bg_image = ImageTk.PhotoImage(bg_scaled)
+                self.canvas_main.itemconfigure(self._bg_item, image=self.bg_image)
+            # Reposition background just in case
+            if getattr(self, "_bg_item", None) is not None:
+                self.canvas_main.coords(self._bg_item, 0, 0)
+        except Exception:
+            pass
+
+        # Unlock button image scaling and position
+        try:
+            if getattr(self, "unlock_item", None) is not None:
+                if _PIL_AVAILABLE and getattr(self, "_unlock_base_pil", None) is not None:
+                    uw, uh = self._unlock_base_size if hasattr(self, "_unlock_base_size") else (98, 98)
+                    tw, th = max(24, int(uw * s)), max(24, int(uh * s))
+                    scaled = self._unlock_base_pil.resize((tw, th), Image.LANCZOS)
+                    self.unlock_img = ImageTk.PhotoImage(scaled)
+                    self.canvas_main.itemconfigure(self.unlock_item, image=self.unlock_img)
+                # Position to center
+                nx, ny = self.NORM_POS["unlock"]
+                self.canvas_main.coords(self.unlock_item, nx * cw, ny * ch)
+        except Exception:
+            pass
+
+        # Lights (OFF)
+        try:
+            if getattr(self, "_item_red_off", None) is not None:
+                nx, ny = self.NORM_POS["red_off"]
+                self.canvas_main.coords(self._item_red_off, nx * cw, ny * ch)
+                if _PIL_AVAILABLE and getattr(self, "_base_red_off_pil", None) is not None:
+                    w = max(1, int(self._base_red_off_pil.width * s))
+                    h = max(1, int(self._base_red_off_pil.height * s))
+                    self._img_red_off = ImageTk.PhotoImage(self._base_red_off_pil.resize((w, h), Image.LANCZOS))
+                    self.canvas_main.itemconfigure(self._item_red_off, image=self._img_red_off)
+            if getattr(self, "_item_green_off", None) is not None:
+                nx, ny = self.NORM_POS["green_off"]
+                self.canvas_main.coords(self._item_green_off, nx * cw, ny * ch)
+                if _PIL_AVAILABLE and getattr(self, "_base_green_off_pil", None) is not None:
+                    w = max(1, int(self._base_green_off_pil.width * s))
+                    h = max(1, int(self._base_green_off_pil.height * s))
+                    self._img_green_off = ImageTk.PhotoImage(self._base_green_off_pil.resize((w, h), Image.LANCZOS))
+                    self.canvas_main.itemconfigure(self._item_green_off, image=self._img_green_off)
+        except Exception:
+            pass
+
+        # Indicator if present
+        try:
+            if getattr(self, "_indicator_item", None) is not None:
+                nx, ny = self.NORM_POS["indicator"]
+                self.canvas_main.coords(self._indicator_item, nx * cw, ny * ch)
+                if _PIL_AVAILABLE and getattr(self, "_base_yellow_on_pil", None) is not None:
+                    w = max(1, int(self._base_yellow_on_pil.width * s))
+                    h = max(1, int(self._base_yellow_on_pil.height * s))
+                    self._indicator_image = ImageTk.PhotoImage(self._base_yellow_on_pil.resize((w, h), Image.LANCZOS))
+                    self.canvas_main.itemconfigure(self._indicator_item, image=self._indicator_image)
+        except Exception:
+            pass
+
+        # Overlays for red/green ON if present
+        try:
+            if getattr(self, "_item_red_on_overlay", None) is not None:
+                # Position overlay at red off
+                nx, ny = self.NORM_POS["red_off"]
+                self.canvas_main.coords(self._item_red_on_overlay, nx * cw, ny * ch)
+                if _PIL_AVAILABLE and getattr(self, "_base_red_on_pil", None) is not None:
+                    w = max(1, int(self._base_red_on_pil.width * s))
+                    h = max(1, int(self._base_red_on_pil.height * s))
+                    self._img_red_on = ImageTk.PhotoImage(self._base_red_on_pil.resize((w, h), Image.LANCZOS))
+                    self.canvas_main.itemconfigure(self._item_red_on_overlay, image=self._img_red_on)
+            if getattr(self, "_item_green_on_overlay", None) is not None:
+                nx, ny = self.NORM_POS["green_off"]
+                self.canvas_main.coords(self._item_green_on_overlay, nx * cw, ny * ch)
+                if _PIL_AVAILABLE and getattr(self, "_base_green_on_pil", None) is not None:
+                    w = max(1, int(self._base_green_on_pil.width * s))
+                    h = max(1, int(self._base_green_on_pil.height * s))
+                    self._img_green_on = ImageTk.PhotoImage(self._base_green_on_pil.resize((w, h), Image.LANCZOS))
+                    self.canvas_main.itemconfigure(self._item_green_on_overlay, image=self._img_green_on)
+        except Exception:
+            pass
+
 
     def clear_overlay_frames(self):
         """Remove any overlay frames and windows."""
@@ -380,29 +684,6 @@ class App:
         t.start()
         return True
 
-    def on_enroll(self):
-        """Handle voice enrollment process."""
-        try:
-            import src.voice_unlock as voice_unlock
-            
-            def do_enroll():
-                # Perform enrollment in background thread; UI updates scheduled on main thread
-                ok = voice_unlock.enroll()
-                try:
-                    if ok:
-                        self.master.after(0, self.set_status, "✅ Voice enrolled. You can now try to unlock.")
-                    else:
-                        self.master.after(0, self.set_status, "Enrollment failed. See console for details.")
-                except Exception:
-                    pass
-
-            # Indicate recording on the main thread before starting
-            self.set_status("Recording enrollment (3s)... 🎤")
-            self.run_in_thread(do_enroll)
-        except ImportError:
-            self.set_status("Could not start enrollment: Voice unlock module not found")
-        except Exception as e:
-            self.set_status(f"Could not start enrollment: {str(e)}")
 
     def on_unlock(self):
         """Handle voice verification process."""
@@ -424,7 +705,23 @@ class App:
                 except Exception:
                     pass
 
-            self.run_in_thread(do_verify)
+            # Show indicator before starting background verification
+            try:
+                self._show_listening_indicator()
+            except Exception:
+                pass
+
+            def wrapped_verify():
+                try:
+                    do_verify()
+                finally:
+                    # Ensure indicator is hidden on completion
+                    try:
+                        self.master.after(0, self._hide_listening_indicator)
+                    except Exception:
+                        pass
+
+            self.run_in_thread(wrapped_verify)
         except ImportError:
             self.set_status("Could not start verification: Voice unlock module not found")
         except Exception as e:
@@ -440,16 +737,26 @@ class App:
         score = result.get("score", 0)
         if status == "granted":
             self.set_status(f"✅ Access Granted! Similarity: {score:.3f}")
+            # Show green ON light over the OFF position
+            try:
+                self._show_green_light_on()
+            except Exception:
+                pass
             # Notify launcher if provided
             try:
                 if callable(getattr(self, "on_unlocked", None)):
                     # Ensure callback on main thread
-                    self.master.after(0, self.on_unlocked)
+                    self.master.after(self.OPEN_NOTE_DELAY_MS, self.on_unlocked)
             except Exception:
                 pass
             self._unlock_journal()
         elif status == "denied":
             self.set_status(f"❌ Access Denied. Similarity: {score:.3f}")
+            # Blink the red light twice to indicate denial
+            try:
+                self._blink_red_light(times=2)
+            except Exception:
+                pass
         else:
             self.set_status(result.get("message", "Unknown result"))
 
