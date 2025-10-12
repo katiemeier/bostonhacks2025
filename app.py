@@ -120,37 +120,54 @@ class Launcher:
         canvas = tk.Canvas(init_root, highlightthickness=0, bd=0)
         canvas.pack(fill="both", expand=True)
 
-        # Load background image
-        bg_path = os.path.join(os.path.dirname(__file__), "assets", "intro_screen.png")
-        bg_img = None
-        try:
-            bg_img = tk.PhotoImage(master=init_root, file=bg_path)
-            # Keep a reference to avoid garbage collection
-            init_root._bg_img_ref = bg_img
-        except Exception:
-            bg_img = None
+        # Base design metrics for proportional scaling
+        BASE_W, BASE_H = 816, 503
 
+        # Load background image (prefer Pillow for smooth scaling)
+        bg_path = os.path.join(os.path.dirname(__file__), "assets", "intro_screen.png")
         bg_item = None
-        if bg_img is not None:
-            # If we know image dimensions, prefer sizing window to match the image
-            try:
-                init_root.geometry(f"{bg_img.width()}x{bg_img.height()}")
-            except Exception:
-                pass
-            bg_item = canvas.create_image(0, 0, image=bg_img, anchor="nw")
-        else:
+        init_root._bg_base_pil = None
+        init_root._bg_img_full = None  # For Tk-only scaling
+        init_root._bg_img_ref = None   # Current PhotoImage reference to avoid GC
+        try:
+            if Image is not None and ImageTk is not None:
+                init_root._bg_base_pil = Image.open(bg_path).convert("RGBA")
+                try:
+                    bw, bh = init_root._bg_base_pil.size
+                    BASE_W, BASE_H = bw, bh
+                    init_root.geometry(f"{bw}x{bh}")
+                except Exception:
+                    pass
+                bg_item = canvas.create_image(0, 0, anchor="nw")  # image assigned during relayout
+            else:
+                # Tk fallback (we will approximate scaling via zoom/subsample)
+                orig = tk.PhotoImage(master=init_root, file=bg_path)
+                init_root._bg_img_full = orig
+                init_root._bg_img_ref = orig
+                try:
+                    BASE_W, BASE_H = orig.width(), orig.height()
+                    init_root.geometry(f"{BASE_W}x{BASE_H}")
+                except Exception:
+                    pass
+                bg_item = canvas.create_image(0, 0, image=orig, anchor="nw")
+        except Exception:
+            init_root._bg_base_pil = None
+            init_root._bg_img_full = None
             # Fallback plain background color
             init_root.configure(bg=INITIAL_BG)
 
         # Title/description/status as canvas text to avoid opaque label backgrounds
+        base_title_size = 16
+        base_desc_size = 10
+        base_status_size = 10
         title_item = canvas.create_text(0, 0, text=INITIAL_TITLE, fill=TEXT_COLOR_TITLE,
-                                        font=("Comic Sans MS", 16, "bold"), anchor="n")
+                                        font=("Comic Sans MS", base_title_size, "bold"), anchor="n")
         desc_text = "Please set your voice password to protect your journal."
         desc_item = canvas.create_text(0, 0, text=desc_text, fill=TEXT_COLOR_DESC,
-                                       font=("Comic Sans MS", 10), width=480, justify="center",
+                                       font=("Comic Sans MS", base_desc_size), width=480, justify="center",
                                        anchor="n")
         status_item = canvas.create_text(0, 0, text="Ready", fill=TEXT_COLOR_STATUS,
-                                         font=("Comic Sans MS", 10), anchor="n")
+                                         font=("Comic Sans MS", base_status_size), anchor="n")
 
         # Enrollment control: image-based button on the canvas
         enrolling = False
@@ -181,27 +198,34 @@ class Launcher:
             nonlocal enrolling
             enrolling = value
 
-        # Try to load the talk button image
+        # Try to load the talk button image (store base to enable responsive scaling)
         talk_img = None
         talk_path = os.path.join(os.path.dirname(__file__), "assets", "talk_button.png")
+        init_root._talk_base_pil = None
+        init_root._talk_img_full = None
+        init_root._talk_img_ref = None
+        init_root._talk_base_size = (0, 0)
         try:
             if Image is not None and ImageTk is not None:
-                pil_img = Image.open(talk_path)
+                pil_img = Image.open(talk_path).convert("RGBA")
                 w, h = pil_img.size
                 # Scale to 1/3 with high-quality resampling
                 target = (max(1, w // 3), max(1, h // 3))
                 pil_img = pil_img.resize(target, getattr(Image, 'Resampling', Image).LANCZOS)
                 talk_img = ImageTk.PhotoImage(image=pil_img, master=init_root)
-                # keep references to prevent GC
-                init_root._talk_pil_img_ref = pil_img
+                # keep base for ongoing scaling
+                init_root._talk_base_pil = Image.open(talk_path).convert("RGBA")
+                # Store base size as 1/3 of original so resize is relative to this baseline
+                init_root._talk_base_size = (max(1, w // 3), max(1, h // 3))
                 init_root._talk_img_ref = talk_img
             else:
-                # Fallback: use Tk PhotoImage and subsample by 3
+                # Fallback: use Tk PhotoImage and show at 1/3 via subsample; scale later via zoom/subsample
                 orig = tk.PhotoImage(master=init_root, file=talk_path)
-                scaled = orig.subsample(3, 3)
-                talk_img = scaled
+                talk_img = orig.subsample(3, 3)
                 init_root._talk_img_full = orig
-                init_root._talk_img_ref = scaled
+                init_root._talk_img_ref = talk_img
+                # Store base size as 1/3 of original
+                init_root._talk_base_size = (max(1, orig.width() // 3), max(1, orig.height() // 3))
         except Exception:
             talk_img = None
 
@@ -220,28 +244,130 @@ class Launcher:
                               command=init_root.destroy)
         close_item = canvas.create_window(0, 0, window=close_btn, anchor="s")
 
-        # Responsive layout: center elements on resize
+        # Helper for Tk-only approximate scaling using zoom/subsample
+        def _scale_photoimage_tk(orig: tk.PhotoImage, tw: int, th: int) -> tk.PhotoImage:
+            try:
+                bw, bh = max(1, orig.width()), max(1, orig.height())
+                tw, th = max(1, tw), max(1, th)
+                # Find integer p/r ~ tw/bw and q/s ~ th/bh
+                def best_ratio(target, base):
+                    best = (1, 1)
+                    best_err = float('inf')
+                    for p in range(1, 10):
+                        for r in range(1, 10):
+                            val = base * p / r
+                            err = abs(val - target)
+                            if err < best_err:
+                                best_err = err
+                                best = (p, r)
+                    return best
+                px, rx = best_ratio(tw, bw)
+                py, ry = best_ratio(th, bh)
+                img = orig.zoom(px, py)
+                img = img.subsample(rx, ry)
+                return img
+            except Exception:
+                return orig
+
+        # Responsive layout: center elements on resize and scale assets proportionally
         def relayout(event=None):
             w = canvas.winfo_width()
             h = canvas.winfo_height()
             cx = w // 2
 
-            # Resize background image positioning
+            # Scale factor relative to base design
+            s = min(max(w, 1) / max(BASE_W, 1), max(h, 1) / max(BASE_H, 1))
+
+            # Background scaling
             if bg_item is not None:
+                if init_root._bg_base_pil is not None and ImageTk is not None:
+                    try:
+                        scaled = init_root._bg_base_pil.resize((max(1, w), max(1, h)), getattr(Image, 'Resampling', Image).LANCZOS)
+                        init_root._bg_img_ref = ImageTk.PhotoImage(scaled)
+                        canvas.itemconfigure(bg_item, image=init_root._bg_img_ref)
+                    except Exception:
+                        pass
+                elif getattr(init_root, "_bg_img_full", None) is not None:
+                    try:
+                        scaled = _scale_photoimage_tk(init_root._bg_img_full, max(1, w), max(1, h))
+                        init_root._bg_img_ref = scaled
+                        canvas.itemconfigure(bg_item, image=init_root._bg_img_ref)
+                    except Exception:
+                        pass
                 canvas.coords(bg_item, 0, 0)
 
-            y = 24
+            # Fonts scaled with clamp
+            def clamp_font(px):
+                return max(8, min(48, int(round(px))))
+            try:
+                canvas.itemconfigure(title_item, font=("Comic Sans MS", clamp_font(base_title_size * s), "bold"))
+                canvas.itemconfigure(desc_item, font=("Comic Sans MS", clamp_font(base_desc_size * s)))
+                canvas.itemconfigure(status_item, font=("Comic Sans MS", clamp_font(base_status_size * s)))
+            except Exception:
+                pass
+
+            # Description width ~ 60% of window, min 320, max w-40
+            try:
+                desc_w = max(320, min(w - 40, int(0.6 * w)))
+                canvas.itemconfigure(desc_item, width=desc_w)
+            except Exception:
+                pass
+
+            # Vertical layout positions with scaled spacers
+            y = int(24 * s)
             canvas.coords(title_item, cx, y)
-            y += 36
-            canvas.coords(desc_item, cx, y + 25)
-            y += 64
-            canvas.coords(status_item, cx, y + 215)
-            y += 28
-            # Move the talk button down by an additional 20 pixels
-            y += 80
-            canvas.coords(enroll_item, cx, y)
-            # Close button near bottom with some padding
-            canvas.coords(close_item, cx, h - 16)
+            y += int(36 * s)
+            canvas.coords(desc_item, cx, y + int(25 * s))
+            y += int(64 * s)
+            # status_item will be positioned relative to the centered talk button below
+
+            # Scale and position talk/enroll button image if applicable
+            if init_root._talk_base_pil is not None and ImageTk is not None:
+                try:
+                    tbw, tbh = init_root._talk_base_size  # already 1/3 of original
+                    tw = max(32, int(tbw * s))
+                    th = max(32, int(tbh * s))
+                    scaled_btn = init_root._talk_base_pil.resize((tw, th), getattr(Image, 'Resampling', Image).LANCZOS)
+                    init_root._talk_img_ref = ImageTk.PhotoImage(scaled_btn)
+                    canvas.itemconfigure(enroll_item, image=init_root._talk_img_ref)
+                    init_root._talk_last_wh = (tw, th)
+                except Exception:
+                    pass
+            elif getattr(init_root, "_talk_img_full", None) is not None:
+                try:
+                    # Base target is 1/3 of original
+                    tbw = max(1, init_root._talk_img_full.width() // 3)
+                    tbh = max(1, init_root._talk_img_full.height() // 3)
+                    tw = max(32, int(tbw * s))
+                    th = max(32, int(tbh * s))
+                    scaled_btn = _scale_photoimage_tk(init_root._talk_img_full, tw, th)
+                    init_root._talk_img_ref = scaled_btn
+                    canvas.itemconfigure(enroll_item, image=init_root._talk_img_ref)
+                    init_root._talk_last_wh = (tw, th)
+                except Exception:
+                    pass
+            # Ensure the talk button is fixed at the center of the screen
+            try:
+                canvas.itemconfigure(enroll_item, anchor="center")
+            except Exception:
+                pass
+            cy = h // 2
+            canvas.coords(enroll_item, cx, cy)
+            # Position status text centered, just below the talk button
+            try:
+                canvas.itemconfigure(status_item, anchor="n")
+            except Exception:
+                pass
+            try:
+                th = 48
+                if hasattr(init_root, "_talk_last_wh") and isinstance(init_root._talk_last_wh, tuple):
+                    th = max(th, int(init_root._talk_last_wh[1]))
+                margin = max(12, int(16 * s))
+                canvas.coords(status_item, cx, cy + th // 2 + margin)
+            except Exception:
+                pass
+            # Close button near bottom with some padding that scales
+            canvas.coords(close_item, cx, h - max(12, int(16 * s)))
 
         canvas.bind("<Configure>", relayout)
         # Initial layout after a tick so geometry is computed
