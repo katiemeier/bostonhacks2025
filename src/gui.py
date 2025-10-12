@@ -43,6 +43,15 @@ class App:
     WINDOW_SIZE = "816x503"  # modified from "720x880"
     CANVAS_SIZE = (796, 280)  # modified from (700, 800)
     NOTEBOOK_PADDING = 40
+    # Base design size and normalized coordinates for key items
+    BASE_WIDTH = 816
+    BASE_HEIGHT = 503
+    NORM_POS = {
+        "unlock": (0.5, 0.5),
+        "indicator": (460/816, 172/503),
+        "red_off": (460/816, 360/503),
+        "green_off": (460/816, 327/503),
+    }
     # Delay after acceptance before opening notebook (ms)
     OPEN_NOTE_DELAY_MS = 800
     
@@ -77,19 +86,40 @@ class App:
             w, h = (int(x) for x in self.WINDOW_SIZE.split("x", 1))
         except Exception:
             w, h = 816, 503
+        self._current_size = (w, h)
+        self._base_size = (self.BASE_WIDTH, self.BASE_HEIGHT)
         self.canvas_main = tk.Canvas(self.master, width=w, height=h, highlightthickness=0, bd=0)
         self.canvas_main.place(x=0, y=0, width=w, height=h)
-        try:
-            self.bg_image = tk.PhotoImage(file="assets/launch2.png")
-            self.canvas_main.create_image(0, 0, image=self.bg_image, anchor="nw")
-        except Exception:
-            # If image fails to load, use the themed background color
-            self.canvas_main.configure(bg=Colors.BG_MAIN)
+        # Load background and draw
+        self._bg_item = None
+        if _PIL_AVAILABLE:
+            try:
+                self._bg_base_pil = Image.open("assets/launch2.png").convert("RGBA")
+                # Scale to current window
+                bg_scaled = self._bg_base_pil.resize((w, h), Image.LANCZOS)
+                self.bg_image = ImageTk.PhotoImage(bg_scaled)
+                self._bg_item = self.canvas_main.create_image(0, 0, image=self.bg_image, anchor="nw")
+            except Exception:
+                self._bg_base_pil = None
+                self.canvas_main.configure(bg=Colors.BG_MAIN)
+        else:
+            try:
+                self.bg_image = tk.PhotoImage(file="assets/launch2.png")
+                self._bg_item = self.canvas_main.create_image(0, 0, image=self.bg_image, anchor="nw")
+            except Exception:
+                # If image fails to load, use the themed background color
+                self.canvas_main.configure(bg=Colors.BG_MAIN)
         # Manage clickability when using canvas items
         self._unlock_clickable = True
         # Draw static off-state lights (red, green) near the listening indicator position
         try:
             self._draw_off_lights()
+        except Exception:
+            pass
+
+        # Bind resize to stretch and reposition assets
+        try:
+            self.master.bind("<Configure>", self._on_configure)
         except Exception:
             pass
 
@@ -99,7 +129,20 @@ class App:
         # Preferred: draw on the main canvas so PNG transparency shows the background
         if hasattr(self, "canvas_main") and self.canvas_main:
             try:
-                self.unlock_img = self._load_unlock_image_scaled(98, 98)
+                # Load base unlock image and scale to initial size
+                self._unlock_base_size = (98, 98)
+                if _PIL_AVAILABLE:
+                    try:
+                        self._unlock_base_pil = Image.open("assets/talk_button.png").convert("RGBA")
+                        uw, uh = self._unlock_base_size
+                        scaled = self._unlock_base_pil.resize((uw, uh), Image.LANCZOS)
+                        self.unlock_img = ImageTk.PhotoImage(scaled)
+                    except Exception:
+                        self._unlock_base_pil = None
+                        self.unlock_img = self._load_unlock_image_scaled(98, 98)
+                else:
+                    self._unlock_base_pil = None
+                    self.unlock_img = self._load_unlock_image_scaled(98, 98)
                 try:
                     w, h = (int(x) for x in self.WINDOW_SIZE.split("x", 1))
                 except Exception:
@@ -155,14 +198,33 @@ class App:
             path = "assets/yellowlight_on.png"
             # Prefer PhotoImage; use PIL when available for consistency
             if _PIL_AVAILABLE:
-                img = Image.open(path).convert("RGBA")
-                self._indicator_image = ImageTk.PhotoImage(img)
+                try:
+                    self._base_yellow_on_pil = getattr(self, "_base_yellow_on_pil", None) or Image.open(path).convert("RGBA")
+                except Exception:
+                    self._base_yellow_on_pil = None
+                if self._base_yellow_on_pil is not None:
+                    # Scale to current factor
+                    cw, ch = self._current_size
+                    s = min(cw / self.BASE_WIDTH, ch / self.BASE_HEIGHT)
+                    w = max(1, int(self._base_yellow_on_pil.width * s))
+                    h = max(1, int(self._base_yellow_on_pil.height * s))
+                    self._indicator_image = ImageTk.PhotoImage(self._base_yellow_on_pil.resize((w, h), Image.LANCZOS))
+                else:
+                    self._indicator_image = None
             else:
-                self._indicator_image = tk.PhotoImage(file=path)
+                try:
+                    self._indicator_image = tk.PhotoImage(file=path)
+                except Exception:
+                    self._indicator_image = None
             # Create image at exact requested coordinates
-            self._indicator_item = self.canvas_main.create_image(
-                460, 172, image=self._indicator_image, anchor="center"
-            )
+            if self._indicator_image is not None:
+                nx, ny = self.NORM_POS["indicator"]
+                cw, ch = self._current_size
+                self._indicator_item = self.canvas_main.create_image(
+                    nx * cw, ny * ch, image=self._indicator_image, anchor="center"
+                )
+            else:
+                self._indicator_item = None
         except Exception:
             # Silently ignore if the asset is missing or fails to load
             self._indicator_item = None
@@ -204,19 +266,26 @@ class App:
             if _PIL_AVAILABLE:
                 red_img = Image.open(red_path).convert("RGBA")
                 green_img = Image.open(green_path).convert("RGBA")
+                # Store base PIL for scaling on resize
+                self._base_red_off_pil = red_img
+                self._base_green_off_pil = green_img
                 self._img_red_off = ImageTk.PhotoImage(red_img)
                 self._img_green_off = ImageTk.PhotoImage(green_img)
                 # Preload the ON images for overlays
                 try:
                     red_on_img = Image.open(red_on_path).convert("RGBA")
+                    self._base_red_on_pil = red_on_img
                     self._img_red_on = ImageTk.PhotoImage(red_on_img)
                 except Exception:
                     self._img_red_on = None
+                    self._base_red_on_pil = None
                 try:
                     green_on_img = Image.open(green_on_path).convert("RGBA")
+                    self._base_green_on_pil = green_on_img
                     self._img_green_on = ImageTk.PhotoImage(green_on_img)
                 except Exception:
                     self._img_green_on = None
+                    self._base_green_on_pil = None
             else:
                 self._img_red_off = tk.PhotoImage(file=red_path)
                 self._img_green_off = tk.PhotoImage(file=green_path)
@@ -235,11 +304,15 @@ class App:
             return
 
         try:
-            self._item_red_off = self.canvas_main.create_image(460, 360, image=self._img_red_off, anchor="center")
+            nx, ny = self.NORM_POS["red_off"]
+            cw, ch = self._current_size
+            self._item_red_off = self.canvas_main.create_image(nx * cw, ny * ch, image=self._img_red_off, anchor="center")
         except Exception:
             self._item_red_off = None
         try:
-            self._item_green_off = self.canvas_main.create_image(460, 327, image=self._img_green_off, anchor="center")
+            nx, ny = self.NORM_POS["green_off"]
+            cw, ch = self._current_size
+            self._item_green_off = self.canvas_main.create_image(nx * cw, ny * ch, image=self._img_green_off, anchor="center")
         except Exception:
             self._item_green_off = None
 
@@ -430,6 +503,114 @@ class App:
         """Show only the background; no welcome back splash screen."""
         self.clear_overlay_frames()
         # Removed welcome back splash screen UI elements
+
+    def _on_configure(self, event):
+        """Handle window resize/fullscreen: scale background and reposition assets proportionally."""
+        try:
+            new_w, new_h = int(event.width), int(event.height)
+        except Exception:
+            return
+        if new_w <= 1 or new_h <= 1:
+            return
+        # Avoid unnecessary work if size unchanged
+        cw, ch = getattr(self, "_current_size", (0, 0))
+        if (new_w, new_h) == (cw, ch):
+            return
+        # Resize canvas to fill window
+        try:
+            self.canvas_main.place(x=0, y=0, width=new_w, height=new_h)
+        except Exception:
+            pass
+        self._current_size = (new_w, new_h)
+        self._rescale_and_reposition()
+
+    def _rescale_and_reposition(self):
+        """Rescale images with PIL when available and reposition to normalized coordinates."""
+        cw, ch = self._current_size
+        bx, by = self.BASE_WIDTH, self.BASE_HEIGHT
+        s = min(cw / bx, ch / by)
+        # Background
+        try:
+            if _PIL_AVAILABLE and getattr(self, "_bg_base_pil", None) is not None and getattr(self, "_bg_item", None) is not None:
+                bg_scaled = self._bg_base_pil.resize((cw, ch), Image.LANCZOS)
+                self.bg_image = ImageTk.PhotoImage(bg_scaled)
+                self.canvas_main.itemconfigure(self._bg_item, image=self.bg_image)
+            # Reposition background just in case
+            if getattr(self, "_bg_item", None) is not None:
+                self.canvas_main.coords(self._bg_item, 0, 0)
+        except Exception:
+            pass
+
+        # Unlock button image scaling and position
+        try:
+            if getattr(self, "unlock_item", None) is not None:
+                if _PIL_AVAILABLE and getattr(self, "_unlock_base_pil", None) is not None:
+                    uw, uh = self._unlock_base_size if hasattr(self, "_unlock_base_size") else (98, 98)
+                    tw, th = max(24, int(uw * s)), max(24, int(uh * s))
+                    scaled = self._unlock_base_pil.resize((tw, th), Image.LANCZOS)
+                    self.unlock_img = ImageTk.PhotoImage(scaled)
+                    self.canvas_main.itemconfigure(self.unlock_item, image=self.unlock_img)
+                # Position to center
+                nx, ny = self.NORM_POS["unlock"]
+                self.canvas_main.coords(self.unlock_item, nx * cw, ny * ch)
+        except Exception:
+            pass
+
+        # Lights (OFF)
+        try:
+            if getattr(self, "_item_red_off", None) is not None:
+                nx, ny = self.NORM_POS["red_off"]
+                self.canvas_main.coords(self._item_red_off, nx * cw, ny * ch)
+                if _PIL_AVAILABLE and getattr(self, "_base_red_off_pil", None) is not None:
+                    w = max(1, int(self._base_red_off_pil.width * s))
+                    h = max(1, int(self._base_red_off_pil.height * s))
+                    self._img_red_off = ImageTk.PhotoImage(self._base_red_off_pil.resize((w, h), Image.LANCZOS))
+                    self.canvas_main.itemconfigure(self._item_red_off, image=self._img_red_off)
+            if getattr(self, "_item_green_off", None) is not None:
+                nx, ny = self.NORM_POS["green_off"]
+                self.canvas_main.coords(self._item_green_off, nx * cw, ny * ch)
+                if _PIL_AVAILABLE and getattr(self, "_base_green_off_pil", None) is not None:
+                    w = max(1, int(self._base_green_off_pil.width * s))
+                    h = max(1, int(self._base_green_off_pil.height * s))
+                    self._img_green_off = ImageTk.PhotoImage(self._base_green_off_pil.resize((w, h), Image.LANCZOS))
+                    self.canvas_main.itemconfigure(self._item_green_off, image=self._img_green_off)
+        except Exception:
+            pass
+
+        # Indicator if present
+        try:
+            if getattr(self, "_indicator_item", None) is not None:
+                nx, ny = self.NORM_POS["indicator"]
+                self.canvas_main.coords(self._indicator_item, nx * cw, ny * ch)
+                if _PIL_AVAILABLE and getattr(self, "_base_yellow_on_pil", None) is not None:
+                    w = max(1, int(self._base_yellow_on_pil.width * s))
+                    h = max(1, int(self._base_yellow_on_pil.height * s))
+                    self._indicator_image = ImageTk.PhotoImage(self._base_yellow_on_pil.resize((w, h), Image.LANCZOS))
+                    self.canvas_main.itemconfigure(self._indicator_item, image=self._indicator_image)
+        except Exception:
+            pass
+
+        # Overlays for red/green ON if present
+        try:
+            if getattr(self, "_item_red_on_overlay", None) is not None:
+                # Position overlay at red off
+                nx, ny = self.NORM_POS["red_off"]
+                self.canvas_main.coords(self._item_red_on_overlay, nx * cw, ny * ch)
+                if _PIL_AVAILABLE and getattr(self, "_base_red_on_pil", None) is not None:
+                    w = max(1, int(self._base_red_on_pil.width * s))
+                    h = max(1, int(self._base_red_on_pil.height * s))
+                    self._img_red_on = ImageTk.PhotoImage(self._base_red_on_pil.resize((w, h), Image.LANCZOS))
+                    self.canvas_main.itemconfigure(self._item_red_on_overlay, image=self._img_red_on)
+            if getattr(self, "_item_green_on_overlay", None) is not None:
+                nx, ny = self.NORM_POS["green_off"]
+                self.canvas_main.coords(self._item_green_on_overlay, nx * cw, ny * ch)
+                if _PIL_AVAILABLE and getattr(self, "_base_green_on_pil", None) is not None:
+                    w = max(1, int(self._base_green_on_pil.width * s))
+                    h = max(1, int(self._base_green_on_pil.height * s))
+                    self._img_green_on = ImageTk.PhotoImage(self._base_green_on_pil.resize((w, h), Image.LANCZOS))
+                    self.canvas_main.itemconfigure(self._item_green_on_overlay, image=self._img_green_on)
+        except Exception:
+            pass
 
 
     def clear_overlay_frames(self):
