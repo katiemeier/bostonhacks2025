@@ -88,9 +88,9 @@ class NoteApp:
         self._lines = [""]
         self.cur_row = 0
         self.cur_col = 0
-    # Selection state: (row, col) pairs or None
-    self.sel_anchor = None  # type: tuple[int, int] | None
-    self.sel_active = None  # type: tuple[int, int] | None
+        # Selection state: (row, col) pairs or None
+        self.sel_anchor = None  # type: ignore[assignment]
+        self.sel_active = None  # type: ignore[assignment]
 
         # Populate TOC items (filenames)
         self._toc_items = []
@@ -102,9 +102,9 @@ class NoteApp:
         self._action_id_to_handler = {}
 
         # Bindings on the background canvas (single surface)
-    self.bg_canvas.bind("<Button-1>", self._on_click)
-    self.bg_canvas.bind("<B1-Motion>", self._on_drag_select)
-    self.bg_canvas.bind("<ButtonRelease-1>", self._on_mouse_up)
+        self.bg_canvas.bind("<Button-1>", self._on_click)
+        self.bg_canvas.bind("<B1-Motion>", self._on_drag_select)
+        self.bg_canvas.bind("<ButtonRelease-1>", self._on_mouse_up)
         self.bg_canvas.bind("<Motion>", self._on_mouse_move)
         self.bg_canvas.bind("<Leave>", self._on_mouse_leave)
         self.bg_canvas.bind("<Key>", self._on_key)
@@ -264,8 +264,8 @@ class NoteApp:
         self.bg_canvas.delete("__bg__")
         self.bg_canvas.delete("toc")
         self.bg_canvas.delete("actions")
-    self.bg_canvas.delete("notebook_line")
-    self.bg_canvas.delete("selection")
+        self.bg_canvas.delete("notebook_line")
+        self.bg_canvas.delete("selection")
         self.bg_canvas.delete("editor_text")
         self.bg_canvas.delete("cursor")
 
@@ -318,29 +318,22 @@ class NoteApp:
         y = self._dy(12)
         spacing = 100 * self._s
         for label, handler in labels:
-            # Create the text first to measure its bbox
+            # Create underlined action text with no background
+            try:
+                # Temporarily apply underline to action font
+                self.action_font.configure(underline=1)
+            except Exception:
+                pass
             item_id = self.bg_canvas.create_text(
                 x, y, text=label, font=self.action_font, fill=FG_PURPLE, anchor="nw",
                 tags=("actions", "action_item", f"action_{label}")
             )
+            # Reset underline after creating this item (font is shared)
+            try:
+                self.action_font.configure(underline=0)
+            except Exception:
+                pass
             bbox = self.bg_canvas.bbox(item_id)
-            # Draw a small pink rectangle behind the text (with padding), then lower it
-            if bbox is not None:
-                pad_x = max(4, int(round(8 * self._s)))
-                pad_y = max(2, int(round(4 * self._s)))
-                rx1 = bbox[0] - pad_x
-                ry1 = bbox[1] - pad_y
-                rx2 = bbox[2] + pad_x
-                ry2 = bbox[3] + pad_y
-                rect_id = self.bg_canvas.create_rectangle(
-                    rx1, ry1, rx2, ry2,
-                    fill=BG_PINK, outline="", tags=("actions", "action_bg", f"action_bg_{label}")
-                )
-                # Ensure rectangle sits behind the text label
-                try:
-                    self.bg_canvas.tag_lower(rect_id, item_id)
-                except Exception:
-                    pass
             # Track action hitboxes/handlers
             self.action_buttons.append({"label": label, "bbox": bbox, "handler": handler, "item_id": item_id})
             self._action_id_to_handler[item_id] = handler
