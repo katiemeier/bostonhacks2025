@@ -1077,7 +1077,11 @@ class NoteApp:
                     width=2,
                     tags=("__custom_cursor__",)
                 )
-                # Ensure cursor is visually above text but won't be treated as clickable
+                try:
+                    self.bg_canvas.itemconfigure(self._cursor_item, state="disabled")
+                except Exception:
+                    pass
+                # Place cursor at the very top of the z-order (on top of everything)
                 try:
                     self.bg_canvas.tag_raise(self._cursor_item)
                 except Exception:
@@ -1087,8 +1091,15 @@ class NoteApp:
         else:
             try:
                 self.bg_canvas.coords(self._cursor_item, *pts)
-                self.bg_canvas.itemconfigure(self._cursor_item, state="normal")
-                self.bg_canvas.tag_raise(self._cursor_item)
+                try:
+                    self.bg_canvas.itemconfigure(self._cursor_item, state="disabled")
+                except Exception:
+                    pass
+                # Keep it at the very top
+                try:
+                    self.bg_canvas.tag_raise(self._cursor_item)
+                except Exception:
+                    pass
             except Exception:
                 pass
         # Hide any existing stem so only the triangle remains
