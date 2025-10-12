@@ -43,6 +43,8 @@ class App:
     WINDOW_SIZE = "816x503"  # modified from "720x880"
     CANVAS_SIZE = (796, 280)  # modified from (700, 800)
     NOTEBOOK_PADDING = 40
+    # Delay after acceptance before opening notebook (ms)
+    OPEN_NOTE_DELAY_MS = 800
     
     # Component positions and sizes as dicts for place() method
     NOTEBOOK_MARGINS = {"x": 20, "y": 20, "width": 756, "height": 240}  # modified from {"x": 110, "y": 300, "width": 500, "height": 340}
@@ -195,6 +197,7 @@ class App:
         red_path = "assets/redlight_off.png"
         green_path = "assets/greenlight_off.png"
         red_on_path = "assets/redlight_on.png"
+        green_on_path = "assets/greenlight_on.png"
 
         # Load images with PIL if available to preserve alpha
         try:
@@ -203,12 +206,17 @@ class App:
                 green_img = Image.open(green_path).convert("RGBA")
                 self._img_red_off = ImageTk.PhotoImage(red_img)
                 self._img_green_off = ImageTk.PhotoImage(green_img)
-                # Preload the ON image for blink overlay
+                # Preload the ON images for overlays
                 try:
                     red_on_img = Image.open(red_on_path).convert("RGBA")
                     self._img_red_on = ImageTk.PhotoImage(red_on_img)
                 except Exception:
                     self._img_red_on = None
+                try:
+                    green_on_img = Image.open(green_on_path).convert("RGBA")
+                    self._img_green_on = ImageTk.PhotoImage(green_on_img)
+                except Exception:
+                    self._img_green_on = None
             else:
                 self._img_red_off = tk.PhotoImage(file=red_path)
                 self._img_green_off = tk.PhotoImage(file=green_path)
@@ -216,6 +224,10 @@ class App:
                     self._img_red_on = tk.PhotoImage(file=red_on_path)
                 except Exception:
                     self._img_red_on = None
+                try:
+                    self._img_green_on = tk.PhotoImage(file=green_on_path)
+                except Exception:
+                    self._img_green_on = None
         except Exception:
             # If either image fails to load, silently skip drawing
             self._img_red_off = None
@@ -230,6 +242,61 @@ class App:
             self._item_green_off = self.canvas_main.create_image(460, 327, image=self._img_green_off, anchor="center")
         except Exception:
             self._item_green_off = None
+
+    def _ensure_green_on_image(self):
+        """Ensure the green ON image is loaded for overlay."""
+        if getattr(self, "_img_green_on", None) is not None:
+            return True
+        path = "assets/greenlight_on.png"
+        try:
+            if _PIL_AVAILABLE:
+                img = Image.open(path).convert("RGBA")
+                self._img_green_on = ImageTk.PhotoImage(img)
+            else:
+                self._img_green_on = tk.PhotoImage(file=path)
+            return True
+        except Exception:
+            self._img_green_on = None
+            return False
+
+    def _show_green_light_on(self):
+        """Show the green ON light over the green OFF position."""
+        canvas = getattr(self, "canvas_main", None)
+        base_item = getattr(self, "_item_green_off", None)
+        if not canvas or not base_item:
+            return
+        if not self._ensure_green_on_image():
+            return
+        try:
+            coords = canvas.coords(base_item)
+            if not coords:
+                return
+            x, y = coords[0], coords[1]
+        except Exception:
+            return
+        overlay = getattr(self, "_item_green_on_overlay", None)
+        try:
+            if overlay is None:
+                self._item_green_on_overlay = canvas.create_image(
+                    x, y, image=self._img_green_on, anchor="center", state="normal"
+                )
+                print("Created green ON overlay")
+            else:
+                canvas.coords(self._item_green_on_overlay, x, y)
+                canvas.itemconfigure(self._item_green_on_overlay, image=self._img_green_on, state="normal")
+        except Exception:
+            return
+
+    def _hide_green_light_on(self):
+        """Hide the green ON overlay if shown."""
+        canvas = getattr(self, "canvas_main", None)
+        overlay = getattr(self, "_item_green_on_overlay", None)
+        if not canvas or overlay is None:
+            return
+        try:
+            canvas.itemconfigure(overlay, state="hidden")
+        except Exception:
+            pass
 
     def _ensure_red_on_image(self):
         """Ensure the red ON image is loaded for blinking."""
@@ -489,11 +556,16 @@ class App:
         score = result.get("score", 0)
         if status == "granted":
             self.set_status(f"✅ Access Granted! Similarity: {score:.3f}")
+            # Show green ON light over the OFF position
+            try:
+                self._show_green_light_on()
+            except Exception:
+                pass
             # Notify launcher if provided
             try:
                 if callable(getattr(self, "on_unlocked", None)):
                     # Ensure callback on main thread
-                    self.master.after(0, self.on_unlocked)
+                    self.master.after(self.OPEN_NOTE_DELAY_MS, self.on_unlocked)
             except Exception:
                 pass
             self._unlock_journal()
