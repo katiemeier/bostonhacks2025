@@ -33,9 +33,22 @@ pip install -r requirements.txt
 
 If you don't have a `requirements.txt`, install the main packages used by the project:
 
+Required runtime libraries:
+- tkinter (bundled with most Python distributions)
+- numpy
+- scipy
+- sounddevice
+- resemblyzer (will pull torch CPU by default)
+
+Optional (improves UX/graphics/audio):
+- Pillow (image scaling quality for GUI)
+- simpleaudio (fallback audio player on non-macOS platforms)
+
+Quick install (CPU-only):
 ```bash
-pip install markdown resemblyzer sounddevice scipy numpy
+pip install numpy scipy sounddevice resemblyzer Pillow simpleaudio
 ```
+Note: On some platforms you may need to install PyTorch manually first for resemblyzer. See https://pytorch.org/get-started/locally/ for a wheel appropriate to your OS/CPU.
 
 ##Notes on platform support:
 - On macOS you may need to allow microphone access the first time the app records.
