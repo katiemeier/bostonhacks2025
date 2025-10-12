@@ -137,6 +137,43 @@ class App:
             )
         self.unlock_btn.place(relx=0.5, rely=0.5, anchor="center")
 
+    def _show_listening_indicator(self):
+        """Show the yellow light indicator at fixed coordinates during listening."""
+        try:
+            if not hasattr(self, "canvas_main") or self.canvas_main is None:
+                return
+            # Avoid duplicating indicator
+            if getattr(self, "_indicator_item", None):
+                return
+            path = "assets/yellowlight_on.png"
+            # Prefer PhotoImage; use PIL when available for consistency
+            if _PIL_AVAILABLE:
+                img = Image.open(path).convert("RGBA")
+                self._indicator_image = ImageTk.PhotoImage(img)
+            else:
+                self._indicator_image = tk.PhotoImage(file=path)
+            # Create image at exact requested coordinates
+            self._indicator_item = self.canvas_main.create_image(
+                460, 172, image=self._indicator_image, anchor="center"
+            )
+        except Exception:
+            # Silently ignore if the asset is missing or fails to load
+            self._indicator_item = None
+
+    def _hide_listening_indicator(self):
+        """Remove the listening indicator if present."""
+        try:
+            if getattr(self, "_indicator_item", None) and getattr(self, "canvas_main", None):
+                try:
+                    self.canvas_main.delete(self._indicator_item)
+                except Exception:
+                    pass
+            self._indicator_item = None
+            # Keep a reference to the image var, but allow GC later
+            self._indicator_image = None
+        except Exception:
+            pass
+
     def _load_unlock_image_scaled(self, width: int, height: int):
         """Load the talk_button image scaled to exact width/height, preserving transparency.
 
@@ -278,7 +315,23 @@ class App:
                 except Exception:
                     pass
 
-            self.run_in_thread(do_verify)
+            # Show indicator before starting background verification
+            try:
+                self._show_listening_indicator()
+            except Exception:
+                pass
+
+            def wrapped_verify():
+                try:
+                    do_verify()
+                finally:
+                    # Ensure indicator is hidden on completion
+                    try:
+                        self.master.after(0, self._hide_listening_indicator)
+                    except Exception:
+                        pass
+
+            self.run_in_thread(wrapped_verify)
         except ImportError:
             self.set_status("Could not start verification: Voice unlock module not found")
         except Exception as e:
