@@ -88,54 +88,55 @@ class Launcher:
             print(f'Error opening note app: {e}')
 
     def _run_initial_setup_window(self):
-        """Create and run the initial setup window for voice enrollment."""
+        """Create and run the initial setup window for voice enrollment with background, voice button, and Comic Sans instructions."""
         init_root = tk.Tk()
         init_root.title(INITIAL_TITLE)
         init_root.geometry(INITIAL_GEOMETRY)
 
-        frame = tk.Frame(init_root, bg=INITIAL_BG)
-        frame.pack(fill="both", expand=True)
+        # Use a canvas to draw the background image
+        canvas = tk.Canvas(init_root, width=816, height=503, highlightthickness=0, bd=0)
+        canvas.pack(fill="both", expand=True)
+        try:
+            from PIL import Image, ImageTk
+            bg_pil = Image.open("assets/intro_screen.png").convert("RGBA")
+            bg_scaled = bg_pil.resize((816, 503), Image.LANCZOS)
+            bg_img = ImageTk.PhotoImage(bg_scaled)
+            canvas.create_image(0, 0, image=bg_img, anchor="nw")
+        except Exception:
+            bg_img = tk.PhotoImage(file="assets/intro_screen.png")
+            canvas.create_image(0, 0, image=bg_img, anchor="nw")
 
-        title = tk.Label(frame, text=INITIAL_TITLE, bg=INITIAL_BG, fg=TEXT_COLOR_TITLE,
-                          font=("Helvetica", 16, "bold"))
-        title.pack(pady=(18, 6))
+        # Load and place the voice button (64x64px, 20px below center)
+        try:
+            from PIL import Image, ImageTk
+            btn_pil = Image.open("assets/talk_button.png").convert("RGBA")
+            btn_scaled = btn_pil.resize((64, 64), Image.LANCZOS)
+            btn_img = ImageTk.PhotoImage(btn_scaled)
+        except Exception:
+            btn_img = tk.PhotoImage(file="assets/talk_button.png")
+        center_x = 816 // 2
+        center_y = 503 // 2 + 20
+        voice_btn = canvas.create_image(center_x, center_y, image=btn_img, anchor="center")
 
-        desc = tk.Label(frame, text="Please set your voice password to protect your journal.",
-                         bg=INITIAL_BG, fg=TEXT_COLOR_DESC, font=("Helvetica", 10),
-                         wraplength=460, justify="center")
-        desc.pack(pady=(0, 14))
+        # Comic Sans text below button
+        text_y = center_y + 44
+        text_id = canvas.create_text(center_x, text_y, text="Click then say your password aloud", font=("Comic Sans MS", 16), fill="#d6336c", anchor="n")
 
-        status_var = tk.StringVar(value="Ready")
-        status_label = tk.Label(frame, textvariable=status_var, bg=INITIAL_BG, fg=TEXT_COLOR_STATUS)
-        status_label.pack(pady=(0, 8))
-
-        def start_enroll():
-            enroll_btn.config(state="disabled")
-
+        # Button click handler
+        def start_enroll(_evt=None):
+            canvas.itemconfig(voice_btn, state="disabled")
+            canvas.itemconfig(text_id, text="Listening")
             def worker():
                 try:
-                    status_var.set("Recording enrollment (3s)... 🎤")
                     res = voice_unlock.enroll()
                     if res:
-                        status_var.set("Enrollment successful. Opening app...")
                         init_root.after(500, init_root.destroy)
-                    else:
-                        status_var.set("Enrollment failed. Try again.")
-                        init_root.after(1500, lambda: enroll_btn.config(state="normal"))
-                except Exception as e:
-                    status_var.set(f"Enrollment error: {e}")
-                    init_root.after(1500, lambda: enroll_btn.config(state="normal"))
-
+                except Exception:
+                    pass
             threading.Thread(target=worker, daemon=True).start()
-
-        enroll_btn = tk.Button(frame, text="Set Voice Password", bg=BUTTON_BG, fg="white",
-                               activebackground=BUTTON_ACTIVE, font=("Helvetica", 12, "bold"), bd=0,
-                               command=start_enroll)
-        enroll_btn.pack(pady=6, ipadx=10, ipady=6)
-
-        close_btn = tk.Button(frame, text="Close", bg=CLOSE_BUTTON_BG, fg=CLOSE_BUTTON_FG, bd=0,
-                              command=init_root.destroy)
-        close_btn.pack(side="bottom", pady=12)
+        canvas.tag_bind(voice_btn, "<Button-1>", start_enroll)
+        canvas.tag_bind(voice_btn, "<Enter>", lambda e: init_root.configure(cursor="hand2"))
+        canvas.tag_bind(voice_btn, "<Leave>", lambda e: init_root.configure(cursor=""))
 
         init_root.mainloop()
 
