@@ -119,6 +119,7 @@ class NoteApp:
         self._action_id_to_handler = {}
         # Custom canvas mouse pointer state
         self._cursor_item = None
+        self._cursor_stem_item = None
 
         # Bindings on the background canvas (single surface)
         self.bg_canvas.bind("<Button-1>", self._on_click)
@@ -1021,6 +1022,8 @@ class NoteApp:
         try:
             if self._cursor_item is not None:
                 self.bg_canvas.itemconfigure(self._cursor_item, state="hidden")
+            if getattr(self, "_cursor_stem_item", None) is not None:
+                self.bg_canvas.itemconfigure(self._cursor_stem_item, state="hidden")
         except Exception:
             pass
 
@@ -1044,16 +1047,26 @@ class NoteApp:
 
     # ====== Custom big purple mouse pointer ======
     def _update_canvas_cursor(self, x: int, y: int):
-        """Draw or move a large purple pointer that follows the mouse on the canvas."""
-        size = max(12, int(round(18 * getattr(self, "_s", 1.0))))
-        # Arrow-shaped polygon points relative to (x, y) tip
+        """Draw or move a rotated triangle pointer (45° CCW) with a small stem at its bottom."""
+        import math
+        s = float(getattr(self, "_s", 1.0))
+        size = max(12, int(round(18 * s)))
+        ang = math.radians(45.0)
+        cos_a, sin_a = math.cos(ang), math.sin(ang)
+        # Define triangle in local coordinates (tip at 0,0), then rotate CCW 45°
+        p0 = (0.0, 0.0)
+        p1 = (-size, size * 0.6)
+        p2 = (0.0, size)
+        def rot(pt):
+            px, py = pt
+            return (px * cos_a - py * sin_a, px * sin_a + py * cos_a)
+        r0 = rot(p0)
+        r1 = rot(p1)
+        r2 = rot(p2)
         pts = [
-            x, y,                       # tip
-            x - size, y + int(size*0.5),
-            x - int(size*0.4), y + int(size*0.6),
-            x - int(size*0.6), y + size,
-            x - int(size*0.2), y + int(size*0.85),
-            x - int(size*0.1), y + int(size*0.3),
+            x + r0[0], y + r0[1],
+            x + r1[0], y + r1[1],
+            x + r2[0], y + r2[1],
         ]
         if self._cursor_item is None:
             try:
@@ -1078,6 +1091,12 @@ class NoteApp:
                 self.bg_canvas.tag_raise(self._cursor_item)
             except Exception:
                 pass
+        # Hide any existing stem so only the triangle remains
+        try:
+            if getattr(self, "_cursor_stem_item", None) is not None:
+                self.bg_canvas.itemconfigure(self._cursor_stem_item, state="hidden")
+        except Exception:
+            pass
 
     def _canvas_item_exists(self, item_id: int) -> bool:
         try:

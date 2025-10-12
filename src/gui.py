@@ -96,6 +96,7 @@ class App:
         except Exception:
             pass
         self._custom_cursor_item = None
+        self._custom_cursor_stem_item = None
         # Load background and draw
         self._bg_item = None
         if _PIL_AVAILABLE:
@@ -380,25 +381,31 @@ class App:
         try:
             if self._custom_cursor_item is not None:
                 self.canvas_main.itemconfigure(self._custom_cursor_item, state="hidden")
+            if getattr(self, "_custom_cursor_stem_item", None) is not None:
+                self.canvas_main.itemconfigure(self._custom_cursor_stem_item, state="hidden")
         except Exception:
             pass
 
     def _update_custom_pointer(self, x: int, y: int):
-        # Draw a large purple arrow-like cursor that scales with window
+        # Draw a large purple triangle cursor, rotated 45° CCW, with a small stem
         try:
             cw, ch = self._current_size
             s = min(cw / self.BASE_WIDTH, ch / self.BASE_HEIGHT)
         except Exception:
             s = 1.0
+        import math
         size = max(12, int(round(18 * s)))
-        pts = [
-            x, y,
-            x - size, y + int(size*0.5),
-            x - int(size*0.4), y + int(size*0.6),
-            x - int(size*0.6), y + size,
-            x - int(size*0.2), y + int(size*0.85),
-            x - int(size*0.1), y + int(size*0.3),
-        ]
+        ang = math.radians(45.0)
+        cos_a, sin_a = math.cos(ang), math.sin(ang)
+        # Define local triangle and rotate
+        p0 = (0.0, 0.0)
+        p1 = (-size, size * 0.6)
+        p2 = (0.0, size)
+        def rot(pt):
+            px, py = pt
+            return (px * cos_a - py * sin_a, px * sin_a + py * cos_a)
+        r0 = rot(p0); r1 = rot(p1); r2 = rot(p2)
+        pts = [x + r0[0], y + r0[1], x + r1[0], y + r1[1], x + r2[0], y + r2[1]]
         if self._custom_cursor_item is None:
             try:
                 self._custom_cursor_item = self.canvas_main.create_polygon(
@@ -414,6 +421,12 @@ class App:
                 self.canvas_main.tag_raise(self._custom_cursor_item)
             except Exception:
                 pass
+        # Hide any existing stem so only the triangle remains
+        try:
+            if getattr(self, "_custom_cursor_stem_item", None) is not None:
+                self.canvas_main.itemconfigure(self._custom_cursor_stem_item, state="hidden")
+        except Exception:
+            pass
 
     def _ensure_green_on_image(self):
         """Ensure the green ON image is loaded for overlay."""
