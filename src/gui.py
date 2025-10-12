@@ -90,6 +90,13 @@ class App:
         self._base_size = (self.BASE_WIDTH, self.BASE_HEIGHT)
         self.canvas_main = tk.Canvas(self.master, width=w, height=h, highlightthickness=0, bd=0)
         self.canvas_main.place(x=0, y=0, width=w, height=h)
+        # Hide OS cursor and draw a custom big purple pointer on the canvas
+        try:
+            self.canvas_main.configure(cursor="none")
+        except Exception:
+            pass
+        self._custom_cursor_item = None
+        self._custom_cursor_stem_item = None
         # Load background and draw
         self._bg_item = None
         if _PIL_AVAILABLE:
@@ -120,6 +127,11 @@ class App:
         # Bind resize to stretch and reposition assets
         try:
             self.master.bind("<Configure>", self._on_configure)
+        except Exception:
+            pass
+        try:
+            self.canvas_main.bind("<Motion>", self._on_mouse_motion)
+            self.canvas_main.bind("<Leave>", self._on_mouse_leave)
         except Exception:
             pass
 
@@ -356,6 +368,79 @@ class App:
             self._item_green_off = self.canvas_main.create_image(nx * cw, ny * ch, image=self._img_green_off, anchor="center")
         except Exception:
             self._item_green_off = None
+
+    def _on_mouse_motion(self, event):
+        # Update the custom big purple pointer on the launcher canvas
+        try:
+            self._update_custom_pointer(event.x, event.y)
+        except Exception:
+            pass
+
+    def _on_mouse_leave(self, event):
+        # Hide the custom pointer when leaving
+        try:
+            if self._custom_cursor_item is not None:
+                self.canvas_main.itemconfigure(self._custom_cursor_item, state="hidden")
+            if getattr(self, "_custom_cursor_stem_item", None) is not None:
+                self.canvas_main.itemconfigure(self._custom_cursor_stem_item, state="hidden")
+        except Exception:
+            pass
+
+    def _update_custom_pointer(self, x: int, y: int):
+        # Draw a large purple triangle cursor, rotated 45° CCW, with a small stem
+        try:
+            cw, ch = self._current_size
+            s = min(cw / self.BASE_WIDTH, ch / self.BASE_HEIGHT)
+        except Exception:
+            s = 1.0
+        import math
+        size = max(12, int(round(18 * s)))
+        ang = math.radians(45.0)
+        cos_a, sin_a = math.cos(ang), math.sin(ang)
+        # Define local triangle and rotate
+        p0 = (0.0, 0.0)
+        p1 = (-size, size * 0.6)
+        p2 = (0.0, size)
+        def rot(pt):
+            px, py = pt
+            return (px * cos_a - py * sin_a, px * sin_a + py * cos_a)
+        r0 = rot(p0); r1 = rot(p1); r2 = rot(p2)
+        pts = [x + r0[0], y + r0[1], x + r1[0], y + r1[1], x + r2[0], y + r2[1]]
+        if self._custom_cursor_item is None:
+            try:
+                self._custom_cursor_item = self.canvas_main.create_polygon(
+                    *pts, fill=Colors.TEXT_SUBTITLE, outline="#ffffff", width=2, tags=("__custom_cursor__",)
+                )
+                try:
+                    self.canvas_main.itemconfigure(self._custom_cursor_item, state="disabled")
+                except Exception:
+                    pass
+                # Place cursor at the absolute top of z-order
+                try:
+                    self.canvas_main.tag_raise(self._custom_cursor_item)
+                except Exception:
+                    pass
+            except Exception:
+                self._custom_cursor_item = None
+        else:
+            try:
+                self.canvas_main.coords(self._custom_cursor_item, *pts)
+                try:
+                    self.canvas_main.itemconfigure(self._custom_cursor_item, state="disabled")
+                except Exception:
+                    pass
+                try:
+                    self.canvas_main.tag_raise(self._custom_cursor_item)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        # Hide any existing stem so only the triangle remains
+        try:
+            if getattr(self, "_custom_cursor_stem_item", None) is not None:
+                self.canvas_main.itemconfigure(self._custom_cursor_stem_item, state="hidden")
+        except Exception:
+            pass
 
     def _ensure_green_on_image(self):
         """Ensure the green ON image is loaded for overlay."""
