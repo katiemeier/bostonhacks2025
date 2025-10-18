@@ -77,5 +77,3 @@ python app.py
 - Voice enrollment/verification: `src/voice_unlock.py`
 - Notes app: `src/noteapp.py`
 
-##Contact
-- If you need any changes to the UX or add features (markdown preview, saving notes, etc.), open an issue or ask me here and I'll implement it.
